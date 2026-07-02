@@ -80,7 +80,7 @@ class SettingsScreen extends ConsumerWidget {
       onChanged: (val) {},
       title: Text(title, style: const TextStyle(color: Colors.white)),
       subtitle: Text(subtitle, style: const TextStyle(color: Colors.white38, fontSize: 12)),
-      activeColor: const Color(0xFF00FFCC),
+      activeThumbColor: const Color(0xFF00FFCC),
     );
   }
 }

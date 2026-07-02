@@ -1,11 +1,9 @@
 import 'dart:ui';
 import 'package:google_mlkit_object_detection/google_mlkit_object_detection.dart';
-import 'package:google_mlkit_subject_segmentation/google_mlkit_subject_segmentation.dart';
 import 'package:project/models/coach_result.dart';
 
 class AIService {
   late ObjectDetector _objectDetector;
-  late SubjectSegmenter _subjectSegmenter;
 
   AIService() {
     _initialize();
@@ -14,26 +12,16 @@ class AIService {
   void _initialize() {
     final options = ObjectDetectorOptions(
       mode: DetectionMode.stream,
-      classifyObjects: true,
+      classifyObjects: false,
       multipleObjects: true,
     );
     _objectDetector = ObjectDetector(options: options);
-
-    final segmenterOptions = SubjectSegmenterOptions(
-      enableForegroundConfidenceMask: true,
-      enableForegroundBitmap: false,
-      enableMultipleSubjects: SubjectResultOptions(
-        enableConfidenceMask: true,
-        enableSubjectBitmap: false,
-      ),
-    );
-    _subjectSegmenter = SubjectSegmenter(options: segmenterOptions);
   }
 
   Future<CoachResult> processImage(InputImage inputImage) async {
     try {
       final objects = await _objectDetector.processImage(inputImage);
-      
+
       if (objects.isEmpty) {
         return CoachResult(instruction: 'Đang tìm chủ thể...');
       }
@@ -51,7 +39,12 @@ class AIService {
       );
 
       final metadata = inputImage.metadata;
-      if (metadata == null) return CoachResult(subjectBounds: bounds, subjectCenter: center, instruction: 'Đang phân tích...');
+      if (metadata == null)
+        return CoachResult(
+          subjectBounds: bounds,
+          subjectCenter: center,
+          instruction: 'Đang phân tích...',
+        );
 
       final imgWidth = metadata.size.width;
       final imgHeight = metadata.size.height;
@@ -62,7 +55,12 @@ class AIService {
     }
   }
 
-  CoachResult _analyzeComposition(Offset center, Rect bounds, double width, double height) {
+  CoachResult _analyzeComposition(
+    Offset center,
+    Rect bounds,
+    double width,
+    double height,
+  ) {
     // 1. Rule of Thirds Points
     final tx1 = width / 3;
     final tx2 = 2 * width / 3;
@@ -80,9 +78,15 @@ class AIService {
     final gy2 = height * 0.618;
 
     final targetPoints = [
-      Offset(tx1, ty1), Offset(tx2, ty1), Offset(tx1, ty2), Offset(tx2, ty2), // 1/3
+      Offset(tx1, ty1),
+      Offset(tx2, ty1),
+      Offset(tx1, ty2),
+      Offset(tx2, ty2), // 1/3
       Offset(cx, cy), // Center
-      Offset(gx1, gy1), Offset(gx2, gy1), Offset(gx1, gy2), Offset(gx2, gy2), // Golden
+      Offset(gx1, gy1),
+      Offset(gx2, gy1),
+      Offset(gx1, gy2),
+      Offset(gx2, gy2), // Golden
     ];
 
     // Priority logic: If subject is very large, prefer Center (Symmetry)
@@ -100,7 +104,8 @@ class AIService {
 
       for (var point in targetPoints) {
         double dist = (center - point).distance;
-        if (dist < minDist * 0.85) { // Chỉ đổi mục tiêu nếu điểm mới gần hơn ít nhất 15%
+        if (dist < minDist * 0.85) {
+          // Chỉ đổi mục tiêu nếu điểm mới gần hơn ít nhất 15%
           minDist = dist;
           nearestPoint = point;
         }
@@ -119,8 +124,9 @@ class AIService {
       }
     }
 
-    double compositionScore = (1.0 - (minDist / (width / 2))).clamp(0.0, 1.0) * 100;
-    
+    double compositionScore =
+        (1.0 - (minDist / (width / 2))).clamp(0.0, 1.0) * 100;
+
     if (subjectSizeRatio < 0.05) {
       instruction = 'Lại gần hơn';
       compositionScore *= 0.8;
@@ -144,6 +150,5 @@ class AIService {
 
   void dispose() {
     _objectDetector.close();
-    _subjectSegmenter.close();
   }
 }

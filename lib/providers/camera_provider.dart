@@ -3,7 +3,9 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-final cameraProvider = StateNotifierProvider<CameraNotifier, CameraState>((ref) {
+final cameraProvider = StateNotifierProvider<CameraNotifier, CameraState>((
+  ref,
+) {
   return CameraNotifier();
 });
 
@@ -61,19 +63,17 @@ class CameraNotifier extends StateNotifier<CameraState> {
   Future<void> _initController(CameraDescription camera) async {
     final controller = CameraController(
       camera,
-      ResolutionPreset.high,
+      ResolutionPreset.medium,
       enableAudio: false,
-      imageFormatGroup: Platform.isAndroid 
-          ? ImageFormatGroup.nv21 // ML Kit handles NV21 well on Android
+      imageFormatGroup: Platform.isAndroid
+          ? ImageFormatGroup
+                .nv21 // ML Kit handles NV21 well on Android
           : ImageFormatGroup.bgra8888,
     );
 
     try {
       await controller.initialize();
-      state = state.copyWith(
-        controller: controller,
-        isInitialized: true,
-      );
+      state = state.copyWith(controller: controller, isInitialized: true);
     } catch (e) {
       state = state.copyWith(error: e.toString());
     }
@@ -81,10 +81,13 @@ class CameraNotifier extends StateNotifier<CameraState> {
 
   Future<void> switchCamera() async {
     if (state.cameras.length < 2) return;
-    
+
     final nextIndex = (state.selectedCameraIndex + 1) % state.cameras.length;
-    state = state.copyWith(isInitialized: false, selectedCameraIndex: nextIndex);
-    
+    state = state.copyWith(
+      isInitialized: false,
+      selectedCameraIndex: nextIndex,
+    );
+
     await state.controller?.dispose();
     await _initController(state.cameras[nextIndex]);
   }

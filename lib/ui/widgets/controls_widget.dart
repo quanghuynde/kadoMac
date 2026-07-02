@@ -2,13 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:project/providers/ai_coach_provider.dart';
 import 'package:project/providers/camera_provider.dart';
-import 'package:project/providers/auth_provider.dart';
+import 'package:project/ui/photo_preview_screen.dart';
 import 'package:project/ui/result_screen.dart';
-
-import 'package:gal/gal.dart';
 import 'package:project/services/database_service.dart';
-
-import 'package:project/ui/profile_screen.dart';
 
 class ControlsWidget extends ConsumerWidget {
   const ControlsWidget({super.key});
@@ -16,6 +12,10 @@ class ControlsWidget extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final aiState = ref.watch(aiCoachProvider);
+
+    final statusText = aiState.isEnabled
+        ? _statusLabel(aiState.status)
+        : 'AI TẮT';
 
     return Container(
       color: Colors.black,
@@ -25,69 +25,138 @@ class ControlsWidget extends ConsumerWidget {
         children: [
           // Zoom Selector
           const _ZoomSelector(),
-          
-          const SizedBox(height: 25),
-          
+
+          const SizedBox(height: 12),
+
+          // AI Status
+          Text(
+            statusText,
+            style: const TextStyle(
+              color: Color(0xFF00FFCC),
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
           // Main Controls Row
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
+            padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 // Gallery Icon
-                IconButton(
-                  icon: const Icon(Icons.photo_library_outlined, color: Colors.white, size: 28),
-                  onPressed: () {
-                    Gal.open();
-                  },
-                ),
-                
-                // Capture Button
-                _CaptureButton(onCapture: () async {
-                  final file = await ref.read(cameraProvider.notifier).takePicture();
-                  if (file != null && context.mounted) {
-                    final aiResult = ref.read(aiCoachProvider);
-                    await DatabaseService().savePhoto(
-                      path: file.path,
-                      result: aiResult.result,
-                      tags: aiResult.tags,
-                    );
-
-                    if (context.mounted) {
+                GestureDetector(
+                  onTap: () async {
+                    final history = await DatabaseService().getPhotoHistory();
+                    if (history.isNotEmpty && context.mounted) {
+                      final last = history.first;
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => ResultScreen(
-                            imagePath: file.path,
-                            result: aiResult.result,
+                          builder: (context) => PhotoPreviewScreen(
+                            imagePath: last['path'] as String,
+                            score: (last['overall_score'] as num).toDouble(),
+                            compositionScore: (last['composition_score'] as num)
+                                .toDouble(),
+                            instruction: last['instruction'] as String,
+                            tags: (last['tags'] as String).isEmpty
+                                ? []
+                                : (last['tags'] as String).split(','),
                           ),
                         ),
                       );
+                    } else if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Chưa có ảnh đã chụp')),
+                      );
                     }
-                  }
-                }),
-                
-                // AI Toggle Switch (High Contrast)
-                GestureDetector(
-                  onTap: () => ref.read(aiCoachProvider.notifier).toggleEnabled(),
-                  child: Column(
-                    children: [
-                      Icon(
-                        aiState.isEnabled ? Icons.auto_awesome : Icons.auto_awesome_outlined,
-                        color: aiState.isEnabled ? const Color(0xFF00FFCC) : Colors.white38,
-                        size: 32,
+                  },
+                  child: Container(
+                    height: 54,
+                    width: 54,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white38, width: 1.5),
+                    ),
+                    child: const Center(
+                      child: Icon(
+                        Icons.photo_library_outlined,
+                        color: Colors.white,
+                        size: 28,
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        aiState.isEnabled ? "BẬT AI" : "TẮT AI",
-                        style: TextStyle(
-                          color: aiState.isEnabled ? const Color(0xFF00FFCC) : Colors.white38,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+
+                // Capture Button
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Container(
+                      height: 110,
+                      width: 110,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(
+                          colors: [Color(0xFF00FFCC), Colors.transparent],
+                          stops: [0.2, 1.0],
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                    Container(
+                      height: 90,
+                      width: 90,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white24, width: 2),
+                      ),
+                    ),
+                    _CaptureButton(
+                      onCapture: () async {
+                        final file = await ref
+                            .read(cameraProvider.notifier)
+                            .takePicture();
+                        if (file != null && context.mounted) {
+                          final aiResult = ref.read(aiCoachProvider);
+                          await DatabaseService().savePhoto(
+                            path: file.path,
+                            result: aiResult.result,
+                            tags: aiResult.tags,
+                          );
+
+                          if (context.mounted) {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ResultScreen(
+                                  imagePath: file.path,
+                                  result: aiResult.result,
+                                ),
+                              ),
+                            );
+                          }
+                        } else if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Không thể chụp ảnh.'),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                  ],
+                ),
+
+                // AI button
+                _ControlCircleButton(
+                  icon: aiState.isEnabled
+                      ? Icons.auto_awesome
+                      : Icons.auto_awesome_outlined,
+                  active: aiState.isEnabled,
+                  onTap: () =>
+                      ref.read(aiCoachProvider.notifier).toggleEnabled(),
                 ),
               ],
             ),
@@ -104,19 +173,28 @@ class _ZoomSelector extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final zoomLevels = [0.5, 1, 2, 4, 8];
-    
+
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
-      children: zoomLevels.map((z) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: GestureDetector(
-          onTap: () => ref.read(cameraProvider.notifier).setZoom(z.toDouble()),
-          child: Text(
-            z == 1 ? "1" : (z < 1 ? ".5" : "${z}x"),
-            style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
-          ),
-        ),
-      )).toList(),
+      children: zoomLevels
+          .map(
+            (z) => Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: GestureDetector(
+                onTap: () =>
+                    ref.read(cameraProvider.notifier).setZoom(z.toDouble()),
+                child: Text(
+                  z == 1 ? "1" : (z < 1 ? ".5" : "${z}x"),
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          )
+          .toList(),
     );
   }
 }
@@ -132,15 +210,25 @@ class _CaptureButton extends StatelessWidget {
       child: Container(
         height: 70,
         width: 70,
-        padding: const EdgeInsets.all(4),
+        padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(color: Colors.white, width: 3),
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.white.withOpacity(0.35),
+              blurRadius: 12,
+              spreadRadius: 2,
+            ),
+          ],
         ),
         child: Container(
           decoration: const BoxDecoration(
-            color: Colors.white,
             shape: BoxShape.circle,
+            color: Colors.black,
+          ),
+          child: const Center(
+            child: Icon(Icons.camera_alt, color: Colors.white, size: 28),
           ),
         ),
       ),
@@ -148,20 +236,58 @@ class _CaptureButton extends StatelessWidget {
   }
 }
 
-class _NavItem extends StatelessWidget {
-  final String label;
-  final bool isActive;
-  const _NavItem({required this.label, required this.isActive});
+class _ControlCircleButton extends StatelessWidget {
+  final IconData icon;
+  final bool active;
+  final VoidCallback onTap;
+
+  const _ControlCircleButton({
+    required this.icon,
+    required this.active,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      label,
-      style: TextStyle(
-        color: isActive ? Colors.white : Colors.white38,
-        fontSize: 14,
-        fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 70,
+        width: 70,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: active ? const Color(0xFF00FFCC) : Colors.white24,
+            width: 2,
+          ),
+          gradient: active
+              ? const RadialGradient(
+                  colors: [Color(0xFF00FFCC), Colors.transparent],
+                  stops: [0.0, 1.0],
+                )
+              : null,
+        ),
+        child: Center(
+          child: Icon(
+            icon,
+            color: active ? const Color(0xFF00FFCC) : Colors.white38,
+            size: 28,
+          ),
+        ),
       ),
     );
+  }
+}
+
+String _statusLabel(AICoachStatus status) {
+  switch (status) {
+    case AICoachStatus.guiding:
+      return 'AI: Hướng dẫn căn chỉnh';
+    case AICoachStatus.finished:
+      return 'AI: Sẵn sàng chụp';
+    case AICoachStatus.adjusted:
+      return 'AI: Đã điều chỉnh';
+    case AICoachStatus.analyzing:
+      return 'AI: Đang phân tích';
   }
 }

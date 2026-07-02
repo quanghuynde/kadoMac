@@ -21,17 +21,18 @@ class OverlayPainter extends CustomPainter {
     if (status == AICoachStatus.analyzing) {
       _drawDotsPattern(canvas, size);
     }
-    
+
     if (showGrid && status != AICoachStatus.analyzing) {
       _drawMinimalGrid(canvas, size);
     }
-    
+
     _drawHorizon(canvas, size);
-    
+
     if (result.subjectBounds != null) {
       if (status == AICoachStatus.guiding) {
         _drawGuideRing(canvas, size);
-      } else if (status == AICoachStatus.adjusted || status == AICoachStatus.finished) {
+      } else if (status == AICoachStatus.adjusted ||
+          status == AICoachStatus.finished) {
         _drawGuideRectangle(canvas, size);
       }
     }
@@ -72,24 +73,26 @@ class OverlayPainter extends CustomPainter {
   void _drawHorizon(Canvas canvas, Size size) {
     final isLevel = horizonAngle.abs() < 1.5;
     final paint = Paint()
-      ..color = isLevel ? const Color(0xFF00FFCC) : Colors.white.withValues(alpha: 0.3)
+      ..color = isLevel
+          ? const Color(0xFF00FFCC)
+          : Colors.white.withValues(alpha: 0.3)
       ..strokeWidth = 1.2;
 
     final center = Offset(size.width / 2, size.height / 2);
     const double gap = 40.0;
     const double lineLen = 30.0;
-    
+
     canvas.save();
     canvas.translate(center.dx, center.dy);
     canvas.rotate(horizonAngle * pi / 180);
-    
+
     canvas.drawLine(Offset(-gap - lineLen, 0), Offset(-gap, 0), paint);
     canvas.drawLine(Offset(gap, 0), Offset(gap + lineLen, 0), paint);
-    
+
     if (isLevel) {
       canvas.drawCircle(Offset.zero, 1.5, paint);
     }
-    
+
     canvas.restore();
   }
 
@@ -98,7 +101,7 @@ class OverlayPainter extends CustomPainter {
 
     final scaleX = size.width / result.imageSize.width;
     final scaleY = size.height / result.imageSize.height;
-    
+
     final currentCenter = Offset(
       result.subjectCenter!.dx * scaleX,
       result.subjectCenter!.dy * scaleY,
@@ -106,23 +109,28 @@ class OverlayPainter extends CustomPainter {
 
     final idealPoint = _getNearestPowerPoint(currentCenter, size);
     final distance = (currentCenter - idealPoint).distance;
-    
+
     // Bố cục mới: Trắng khi đang tìm, Xanh khi khớp
     final bool isLocked = distance < 35;
     final Color activeColor = isLocked ? const Color(0xFF00FFCC) : Colors.white;
-    
+
     // 1. Vẽ Vòng tròn mục tiêu (Màu trắng)
     final ringPaint = Paint()
       ..color = activeColor.withValues(alpha: isLocked ? 1.0 : 0.5)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0;
-    
+
     canvas.drawCircle(idealPoint, 30, ringPaint);
     canvas.drawCircle(idealPoint, 3, Paint()..color = activeColor);
 
     // 2. Vẽ Mũi tên động tiến dần đến tâm
     if (!isLocked) {
-      _drawEnhancedDynamicArrow(canvas, currentCenter, idealPoint, Colors.white);
+      _drawEnhancedDynamicArrow(
+        canvas,
+        currentCenter,
+        idealPoint,
+        Colors.white,
+      );
     } else {
       // Hiệu ứng "TỰ ĐỘNG ZOOM" khi đã khóa
       final glowPaint = Paint()
@@ -132,7 +140,12 @@ class OverlayPainter extends CustomPainter {
     }
   }
 
-  void _drawEnhancedDynamicArrow(Canvas canvas, Offset subjectPos, Offset targetPos, Color color) {
+  void _drawEnhancedDynamicArrow(
+    Canvas canvas,
+    Offset subjectPos,
+    Offset targetPos,
+    Color color,
+  ) {
     final dir = (targetPos - subjectPos);
     final distance = dir.distance;
     if (distance < 5.0) return;
@@ -152,7 +165,7 @@ class OverlayPainter extends CustomPainter {
     final path = Path();
     // Mũi tên to hơn khi ở gần mục tiêu
     final double headSize = 15.0 + (1 - min(distance / 200, 1.0)) * 10;
-    
+
     final p1 = arrowBasePos + _rotate(normalized, pi * 0.85) * headSize;
     final p2 = arrowBasePos + _rotate(normalized, -pi * 0.85) * headSize;
 
@@ -162,12 +175,16 @@ class OverlayPainter extends CustomPainter {
     path.close();
 
     canvas.drawPath(path, Paint()..color = color);
-    
+
     // Thêm các vạch "gia tốc" phía sau mũi tên
     for (int i = 1; i <= 3; i++) {
       final tailPos = arrowBasePos - normalized * (i * 12.0);
       final opacity = 0.8 - (i * 0.2);
-      canvas.drawCircle(tailPos, 1.5, Paint()..color = color.withValues(alpha: opacity));
+      canvas.drawCircle(
+        tailPos,
+        1.5,
+        Paint()..color = color.withValues(alpha: opacity),
+      );
     }
   }
 
@@ -189,9 +206,12 @@ class OverlayPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0;
 
-    final RRect rrect = RRect.fromRectAndRadius(rect, const Radius.circular(16));
+    final RRect rrect = RRect.fromRectAndRadius(
+      rect,
+      const Radius.circular(16),
+    );
     canvas.drawRRect(rrect, paint);
-    
+
     // Glowing corners
     _drawCorners(canvas, rect, const Color(0xFF00FFCC));
   }
@@ -208,16 +228,36 @@ class OverlayPainter extends CustomPainter {
     canvas.drawLine(rect.topLeft, rect.topLeft + const Offset(0, len), paint);
 
     // Top Right
-    canvas.drawLine(rect.topRight, rect.topRight + const Offset(-len, 0), paint);
+    canvas.drawLine(
+      rect.topRight,
+      rect.topRight + const Offset(-len, 0),
+      paint,
+    );
     canvas.drawLine(rect.topRight, rect.topRight + const Offset(0, len), paint);
 
     // Bottom Left
-    canvas.drawLine(rect.bottomLeft, rect.bottomLeft + const Offset(len, 0), paint);
-    canvas.drawLine(rect.bottomLeft, rect.bottomLeft + const Offset(0, -len), paint);
+    canvas.drawLine(
+      rect.bottomLeft,
+      rect.bottomLeft + const Offset(len, 0),
+      paint,
+    );
+    canvas.drawLine(
+      rect.bottomLeft,
+      rect.bottomLeft + const Offset(0, -len),
+      paint,
+    );
 
     // Bottom Right
-    canvas.drawLine(rect.bottomRight, rect.bottomRight + const Offset(-len, 0), paint);
-    canvas.drawLine(rect.bottomRight, rect.bottomRight + const Offset(0, -len), paint);
+    canvas.drawLine(
+      rect.bottomRight,
+      rect.bottomRight + const Offset(-len, 0),
+      paint,
+    );
+    canvas.drawLine(
+      rect.bottomRight,
+      rect.bottomRight + const Offset(0, -len),
+      paint,
+    );
   }
 
   Offset _getNearestPowerPoint(Offset center, Size size) {
@@ -225,8 +265,15 @@ class OverlayPainter extends CustomPainter {
     final tx2 = 2 * size.width / 3;
     final ty1 = size.height / 3;
     final ty2 = 2 * size.height / 3;
-    final points = [Offset(tx1, ty1), Offset(tx2, ty1), Offset(tx1, ty2), Offset(tx2, ty2)];
-    return points.reduce((a, b) => (center - a).distance < (center - b).distance ? a : b);
+    final points = [
+      Offset(tx1, ty1),
+      Offset(tx2, ty1),
+      Offset(tx1, ty2),
+      Offset(tx2, ty2),
+    ];
+    return points.reduce(
+      (a, b) => (center - a).distance < (center - b).distance ? a : b,
+    );
   }
 
   Offset _rotate(Offset o, double angle) {
@@ -238,6 +285,11 @@ class OverlayPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant OverlayPainter oldDelegate) {
-    return oldDelegate.result != result || oldDelegate.status != status || oldDelegate.horizonAngle != horizonAngle;
+    return oldDelegate.horizonAngle != horizonAngle ||
+        oldDelegate.showGrid != showGrid ||
+        oldDelegate.status != status ||
+        oldDelegate.result.subjectBounds != result.subjectBounds ||
+        oldDelegate.result.subjectCenter != result.subjectCenter ||
+        oldDelegate.result.score != result.score;
   }
 }
