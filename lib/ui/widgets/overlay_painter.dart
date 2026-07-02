@@ -38,7 +38,7 @@ class OverlayPainter extends CustomPainter {
   }
 
   void _drawDotsPattern(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.white.withOpacity(0.3);
+    final paint = Paint()..color = Colors.white.withValues(alpha: 0.3);
     const double spacing = 30.0;
     for (double x = 0; x < size.width; x += spacing) {
       for (double y = 0; y < size.height; y += spacing) {
@@ -49,7 +49,7 @@ class OverlayPainter extends CustomPainter {
 
   void _drawMinimalGrid(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withAlpha((0.15 * 255).toInt())
+      ..color = Colors.white.withValues(alpha: 0.15)
       ..strokeWidth = 0.5;
 
     final double w = size.width;
@@ -72,7 +72,7 @@ class OverlayPainter extends CustomPainter {
   void _drawHorizon(Canvas canvas, Size size) {
     final isLevel = horizonAngle.abs() < 1.5;
     final paint = Paint()
-      ..color = isLevel ? const Color(0xFF00FFCC) : Colors.white.withAlpha((0.3 * 255).toInt())
+      ..color = isLevel ? const Color(0xFF00FFCC) : Colors.white.withValues(alpha: 0.3)
       ..strokeWidth = 1.2;
 
     final center = Offset(size.width / 2, size.height / 2);
@@ -113,7 +113,7 @@ class OverlayPainter extends CustomPainter {
     
     // 1. Vẽ Vòng tròn mục tiêu (Màu trắng)
     final ringPaint = Paint()
-      ..color = activeColor.withAlpha((isLocked ? 1.0 : 0.5 * 255).toInt())
+      ..color = activeColor.withValues(alpha: isLocked ? 1.0 : 0.5)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0;
     
@@ -126,7 +126,7 @@ class OverlayPainter extends CustomPainter {
     } else {
       // Hiệu ứng phát sáng khi khóa mục tiêu
       final glowPaint = Paint()
-        ..color = const Color(0xFF00FFCC).withAlpha((0.3 * 255).toInt())
+        ..color = const Color(0xFF00FFCC).withValues(alpha: 0.3)
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
       canvas.drawCircle(idealPoint, 40, glowPaint);
     }
@@ -135,18 +135,18 @@ class OverlayPainter extends CustomPainter {
   void _drawDynamicArrow(Canvas canvas, Offset subjectPos, Offset targetPos, Color color) {
     final dir = (targetPos - subjectPos);
     final distance = dir.distance;
+    if (distance < 1.0) return;
     final normalized = dir / distance;
 
     final paint = Paint()
-      ..color = color.withAlpha((0.8 * 255).toInt())
+      ..color = color.withValues(alpha: 0.8)
       ..strokeWidth = 2.0
       ..strokeCap = StrokeCap.round;
 
     // Vẽ đường dẫn mảnh từ chủ thể
-    canvas.drawLine(subjectPos, targetPos, Paint()..color = Colors.white10);
+    canvas.drawLine(subjectPos, targetPos, Paint()..color = Colors.white.withValues(alpha: 0.1));
 
     // Mũi tên sẽ tiến dần từ chủ thể đến mục tiêu dựa trên khoảng cách
-    // Chúng ta vẽ mũi tên ở vị trí "đang tiến tới"
     final double arrowProgress = min(distance, 60.0);
     final arrowBasePos = subjectPos + normalized * arrowProgress;
 
@@ -162,13 +162,6 @@ class OverlayPainter extends CustomPainter {
     path.close();
 
     canvas.drawPath(path, Paint()..color = color);
-  }
-
-  Offset _rotate(Offset o, double angle) {
-    return Offset(
-      o.dx * cos(angle) - o.dy * sin(angle),
-      o.dx * sin(angle) + o.dy * cos(angle),
-    );
   }
 
   void _drawGuideRectangle(Canvas canvas, Size size) {
@@ -227,6 +220,13 @@ class OverlayPainter extends CustomPainter {
     final ty2 = 2 * size.height / 3;
     final points = [Offset(tx1, ty1), Offset(tx2, ty1), Offset(tx1, ty2), Offset(tx2, ty2)];
     return points.reduce((a, b) => (center - a).distance < (center - b).distance ? a : b);
+  }
+
+  Offset _rotate(Offset o, double angle) {
+    return Offset(
+      o.dx * cos(angle) - o.dy * sin(angle),
+      o.dx * sin(angle) + o.dy * cos(angle),
+    );
   }
 
   @override
