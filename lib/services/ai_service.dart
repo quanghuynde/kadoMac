@@ -122,7 +122,6 @@ class AIService {
 
     double compositionScore = (1.0 - (minDist / (width / 2))).clamp(0.0, 1.0) * 100;
     
-    double subjectSizeRatio = (bounds.width * bounds.height) / (width * height);
     if (subjectSizeRatio < 0.05) {
       instruction = 'Lại gần hơn';
       compositionScore *= 0.8;
