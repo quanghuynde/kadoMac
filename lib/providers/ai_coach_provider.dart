@@ -148,7 +148,8 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
 
   void _handleAutoZoom(CoachResult result) {
     // Chỉ zoom khi người dùng ĐÃ di chuyển máy vào đúng vị trí (isLocked)
-    final scaleX = 1080 / result.imageSize.width; // Giả định chiều rộng chuẩn để tính toán
+    final scaleX = 1080 / result.imageSize.width; 
+    final scaleY = 1920 / result.imageSize.height;
     final currentCenter = Offset(result.subjectCenter!.dx * scaleX, result.subjectCenter!.dy * scaleY);
     // Lưu ý: Tôi cần lấy Size màn hình thực tế, nhưng ở đây dùng logic khoảng cách tương đối từ AIService
     

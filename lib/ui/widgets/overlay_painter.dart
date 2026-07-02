@@ -145,11 +145,6 @@ class OverlayPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
     canvas.drawLine(subjectPos, targetPos, trackPaint);
 
-    final paint = Paint()
-      ..color = color.withValues(alpha: 0.9)
-      ..strokeWidth = 3.0
-      ..strokeCap = StrokeCap.round;
-
     // Vẽ mũi tên ở vị trí cách tâm mục tiêu một khoảng tỉ lệ với độ chính xác
     final double arrowProgress = min(distance * 0.7, 100.0);
     final arrowBasePos = subjectPos + normalized * arrowProgress;
