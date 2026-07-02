@@ -122,39 +122,44 @@ class OverlayPainter extends CustomPainter {
 
     // 2. Vẽ Mũi tên động tiến dần đến tâm
     if (!isLocked) {
-      _drawDynamicArrow(canvas, currentCenter, idealPoint, Colors.white);
+      _drawEnhancedDynamicArrow(canvas, currentCenter, idealPoint, Colors.white);
     } else {
-      // Hiệu ứng phát sáng khi khóa mục tiêu
+      // Hiệu ứng "TỰ ĐỘNG ZOOM" khi đã khóa
       final glowPaint = Paint()
-        ..color = const Color(0xFF00FFCC).withValues(alpha: 0.3)
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
-      canvas.drawCircle(idealPoint, 40, glowPaint);
+        ..color = const Color(0xFF00FFCC).withValues(alpha: 0.4)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 15);
+      canvas.drawCircle(idealPoint, 50, glowPaint);
     }
   }
 
-  void _drawDynamicArrow(Canvas canvas, Offset subjectPos, Offset targetPos, Color color) {
+  void _drawEnhancedDynamicArrow(Canvas canvas, Offset subjectPos, Offset targetPos, Color color) {
     final dir = (targetPos - subjectPos);
     final distance = dir.distance;
-    if (distance < 1.0) return;
+    if (distance < 5.0) return;
     final normalized = dir / distance;
 
+    // Đường dẫn "đường ray" cho người dùng biết hướng đi
+    final trackPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.05)
+      ..strokeWidth = 15.0
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(subjectPos, targetPos, trackPaint);
+
     final paint = Paint()
-      ..color = color.withValues(alpha: 0.8)
-      ..strokeWidth = 2.0
+      ..color = color.withValues(alpha: 0.9)
+      ..strokeWidth = 3.0
       ..strokeCap = StrokeCap.round;
 
-    // Vẽ đường dẫn mảnh từ chủ thể
-    canvas.drawLine(subjectPos, targetPos, Paint()..color = Colors.white.withValues(alpha: 0.1));
-
-    // Mũi tên sẽ tiến dần từ chủ thể đến mục tiêu dựa trên khoảng cách
-    final double arrowProgress = min(distance, 60.0);
+    // Vẽ mũi tên ở vị trí cách tâm mục tiêu một khoảng tỉ lệ với độ chính xác
+    final double arrowProgress = min(distance * 0.7, 100.0);
     final arrowBasePos = subjectPos + normalized * arrowProgress;
 
     final path = Path();
-    const double headSize = 12.0;
+    // Mũi tên to hơn khi ở gần mục tiêu
+    final double headSize = 15.0 + (1 - min(distance / 200, 1.0)) * 10;
     
-    final p1 = arrowBasePos + _rotate(normalized, pi * 0.8) * headSize;
-    final p2 = arrowBasePos + _rotate(normalized, -pi * 0.8) * headSize;
+    final p1 = arrowBasePos + _rotate(normalized, pi * 0.85) * headSize;
+    final p2 = arrowBasePos + _rotate(normalized, -pi * 0.85) * headSize;
 
     path.moveTo(arrowBasePos.dx, arrowBasePos.dy);
     path.lineTo(p1.dx, p1.dy);
@@ -162,6 +167,13 @@ class OverlayPainter extends CustomPainter {
     path.close();
 
     canvas.drawPath(path, Paint()..color = color);
+    
+    // Thêm các vạch "gia tốc" phía sau mũi tên
+    for (int i = 1; i <= 3; i++) {
+      final tailPos = arrowBasePos - normalized * (i * 12.0);
+      final opacity = 0.8 - (i * 0.2);
+      canvas.drawCircle(tailPos, 1.5, Paint()..color = color.withValues(alpha: opacity));
+    }
   }
 
   void _drawGuideRectangle(Canvas canvas, Size size) {

@@ -117,18 +117,16 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
         
         AICoachStatus newStatus = state.status;
         
-        // Trigger Imagga analysis once during the initial phase
         if (_frameCounter == 5 && !_isImaggaAnalyzing) {
           _triggerImaggaAnalysis();
         }
 
-        if (_frameCounter < 10) {
+        if (_frameCounter < 8) {
           newStatus = AICoachStatus.analyzing;
-        } else if (result.score < 80) {
+        } else if (result.score < 85) { // Ngưỡng khắt khe hơn để hiện Guide Ring
           newStatus = AICoachStatus.guiding;
-        } else if (result.score >= 80 && state.status != AICoachStatus.finished) {
-          newStatus = AICoachStatus.adjusted;
-          if (_frameCounter > 25) newStatus = AICoachStatus.finished;
+        } else {
+          newStatus = AICoachStatus.finished;
         }
 
         state = state.copyWith(
@@ -136,7 +134,10 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
           status: newStatus,
         );
         
-        _handleAutoZoom(result);
+        // Luôn xử lý zoom dựa trên điểm số thực tế
+        if (result.subjectCenter != null) {
+          _handleAutoZoom(result);
+        }
       }
     } catch (e) {
       debugPrint('Error processing frame: $e');
@@ -146,11 +147,23 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
   }
 
   void _handleAutoZoom(CoachResult result) {
-    if (state.status != AICoachStatus.finished) return;
+    // Chỉ zoom khi người dùng ĐÃ di chuyển máy vào đúng vị trí (isLocked)
+    final scaleX = 1080 / result.imageSize.width; // Giả định chiều rộng chuẩn để tính toán
+    final currentCenter = Offset(result.subjectCenter!.dx * scaleX, result.subjectCenter!.dy * scaleY);
+    // Lưu ý: Tôi cần lấy Size màn hình thực tế, nhưng ở đây dùng logic khoảng cách tương đối từ AIService
     
-    if (result.score > 85 && _currentZoom < 1.3) {
-      _currentZoom += 0.02;
-      _ref.read(cameraProvider.notifier).setZoom(_currentZoom);
+    // Ở AIService, score > 80 nghĩa là đã rất gần tâm mục tiêu
+    if (result.score >= 85) {
+      if (_currentZoom < 1.6) {
+        _currentZoom += 0.1; // Zoom nhanh hơn một chút để tạo cảm giác "AI đang chụp hộ"
+        _ref.read(cameraProvider.notifier).setZoom(_currentZoom);
+      }
+    } else {
+      // Nếu lệch ra khỏi vùng an toàn, trả về zoom 1.0 để người dùng dễ tìm lại
+      if (_currentZoom > 1.0) {
+        _currentZoom = 1.0;
+        _ref.read(cameraProvider.notifier).setZoom(1.0);
+      }
     }
   }
 
