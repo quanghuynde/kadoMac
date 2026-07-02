@@ -153,13 +153,16 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
     // Sử dụng ngưỡng điểm số cao và ổn định hơn để tránh giật
     if (result.score >= 88) {
       if (_currentZoom < 1.4) {
-        _currentZoom += 0.05; 
+        // Zoom vào từ từ
+        _currentZoom += 0.02; 
         _ref.read(cameraProvider.notifier).setZoom(_currentZoom);
       }
-    } else if (result.score < 65) {
+    } else if (result.score < 70) { 
       if (_currentZoom > 1.0) {
-        _currentZoom = 1.0;
-        _ref.read(cameraProvider.notifier).setZoom(1.0);
+        // Zoom ra từ từ để tránh giật hình
+        _currentZoom -= 0.05;
+        if (_currentZoom < 1.0) _currentZoom = 1.0;
+        _ref.read(cameraProvider.notifier).setZoom(_currentZoom);
       }
     }
   }

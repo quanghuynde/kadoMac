@@ -5,6 +5,7 @@ import 'package:project/providers/camera_provider.dart';
 import 'package:project/providers/auth_provider.dart';
 import 'package:project/ui/result_screen.dart';
 
+import 'package:gal/gal.dart';
 import 'package:project/services/database_service.dart';
 
 import 'package:project/ui/profile_screen.dart';
@@ -36,7 +37,9 @@ class ControlsWidget extends ConsumerWidget {
                 // Gallery Icon
                 IconButton(
                   icon: const Icon(Icons.photo_library_outlined, color: Colors.white, size: 28),
-                  onPressed: () {},
+                  onPressed: () {
+                    Gal.open();
+                  },
                 ),
                 
                 // Capture Button

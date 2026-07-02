@@ -91,17 +91,16 @@ class AIService {
     double minDist;
 
     if (subjectSizeRatio > 0.45) {
-      // Large subject -> Symmetry priority
       nearestPoint = Offset(cx, cy);
       minDist = (center - nearestPoint).distance;
     } else {
-      // Normal/Small subject -> Nearest point among all candidates
+      // Tìm điểm gần nhất nhưng cho phép một sai số (hysteresis)
       nearestPoint = targetPoints[0];
       minDist = (center - targetPoints[0]).distance;
 
       for (var point in targetPoints) {
         double dist = (center - point).distance;
-        if (dist < minDist) {
+        if (dist < minDist * 0.85) { // Chỉ đổi mục tiêu nếu điểm mới gần hơn ít nhất 15%
           minDist = dist;
           nearestPoint = point;
         }
