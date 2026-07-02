@@ -97,7 +97,8 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
       if (!state.isEnabled || _isBusy) return;
 
       final now = DateTime.now();
-      if (now.difference(_lastProcessTime).inMilliseconds < 250) { 
+      // Tối ưu: Chỉ phân tích mỗi 200ms (5 FPS) để giữ Camera preview mượt mà
+      if (now.difference(_lastProcessTime).inMilliseconds < 200) {
         return;
       }
 
@@ -147,20 +148,15 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
   }
 
   void _handleAutoZoom(CoachResult result) {
-    // Chỉ zoom khi người dùng ĐÃ di chuyển máy vào đúng vị trí (isLocked)
-    final scaleX = 1080 / result.imageSize.width; 
-    final scaleY = 1920 / result.imageSize.height;
-    final currentCenter = Offset(result.subjectCenter!.dx * scaleX, result.subjectCenter!.dy * scaleY);
-    // Lưu ý: Tôi cần lấy Size màn hình thực tế, nhưng ở đây dùng logic khoảng cách tương đối từ AIService
+    if (result.subjectCenter == null || result.imageSize == Size.zero) return;
     
-    // Ở AIService, score > 80 nghĩa là đã rất gần tâm mục tiêu
-    if (result.score >= 85) {
-      if (_currentZoom < 1.6) {
-        _currentZoom += 0.1; // Zoom nhanh hơn một chút để tạo cảm giác "AI đang chụp hộ"
+    // Sử dụng ngưỡng điểm số cao và ổn định hơn để tránh giật
+    if (result.score >= 88) {
+      if (_currentZoom < 1.4) {
+        _currentZoom += 0.05; 
         _ref.read(cameraProvider.notifier).setZoom(_currentZoom);
       }
-    } else {
-      // Nếu lệch ra khỏi vùng an toàn, trả về zoom 1.0 để người dùng dễ tìm lại
+    } else if (result.score < 65) {
       if (_currentZoom > 1.0) {
         _currentZoom = 1.0;
         _ref.read(cameraProvider.notifier).setZoom(1.0);

@@ -14,6 +14,8 @@ class CameraPreviewWidget extends ConsumerWidget {
       return const Center(child: CircularProgressIndicator());
     }
 
-    return CameraPreview(cameraState.controller!);
+    return RepaintBoundary(
+      child: CameraPreview(cameraState.controller!),
+    );
   }
 }

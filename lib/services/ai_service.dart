@@ -63,26 +63,48 @@ class AIService {
   }
 
   CoachResult _analyzeComposition(Offset center, Rect bounds, double width, double height) {
+    // 1. Rule of Thirds Points
     final tx1 = width / 3;
     final tx2 = 2 * width / 3;
     final ty1 = height / 3;
     final ty2 = 2 * height / 3;
 
+    // 2. Center Point (for Symmetry)
+    final cx = width / 2;
+    final cy = height / 2;
+
+    // 3. Golden Ratio Points (Phi Grid - approx 0.38 / 0.62)
+    final gx1 = width * 0.382;
+    final gx2 = width * 0.618;
+    final gy1 = height * 0.382;
+    final gy2 = height * 0.618;
+
     final targetPoints = [
-      Offset(tx1, ty1),
-      Offset(tx2, ty1),
-      Offset(tx1, ty2),
-      Offset(tx2, ty2),
+      Offset(tx1, ty1), Offset(tx2, ty1), Offset(tx1, ty2), Offset(tx2, ty2), // 1/3
+      Offset(cx, cy), // Center
+      Offset(gx1, gy1), Offset(gx2, gy1), Offset(gx1, gy2), Offset(gx2, gy2), // Golden
     ];
 
-    Offset nearestPoint = targetPoints[0];
-    double minDist = (center - targetPoints[0]).distance;
+    // Priority logic: If subject is very large, prefer Center (Symmetry)
+    double subjectSizeRatio = (bounds.width * bounds.height) / (width * height);
+    Offset nearestPoint;
+    double minDist;
 
-    for (var point in targetPoints) {
-      double dist = (center - point).distance;
-      if (dist < minDist) {
-        minDist = dist;
-        nearestPoint = point;
+    if (subjectSizeRatio > 0.45) {
+      // Large subject -> Symmetry priority
+      nearestPoint = Offset(cx, cy);
+      minDist = (center - nearestPoint).distance;
+    } else {
+      // Normal/Small subject -> Nearest point among all candidates
+      nearestPoint = targetPoints[0];
+      minDist = (center - targetPoints[0]).distance;
+
+      for (var point in targetPoints) {
+        double dist = (center - point).distance;
+        if (dist < minDist) {
+          minDist = dist;
+          nearestPoint = point;
+        }
       }
     }
 
