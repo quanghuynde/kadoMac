@@ -8,41 +8,58 @@ import 'package:project/models/coach_result.dart';
 import 'package:project/providers/camera_provider.dart';
 import 'package:project/services/ai_service.dart';
 import 'package:project/services/imagga_service.dart';
+import 'package:project/providers/settings_provider.dart';
 
 enum AICoachStatus { analyzing, guiding, adjusted, finished }
 
 class AICoachState {
   final CoachResult result;
+  final CoachResult displayResult;
+  final Rect? roiBounds;
   final bool isEnabled;
   final bool isProcessing;
   final AICoachStatus status;
   final List<String> tags;
   final String? recommendedFilter;
+  final bool autoCaptureEnabled;
+  final bool autoCaptureRequested;
 
   AICoachState({
     required this.result,
+    CoachResult? displayResult,
+    this.roiBounds,
     this.isEnabled = true,
     this.isProcessing = false,
     this.status = AICoachStatus.analyzing,
     this.tags = const [],
     this.recommendedFilter,
-  });
+    this.autoCaptureEnabled = false,
+    this.autoCaptureRequested = false,
+  }) : displayResult = displayResult ?? result;
 
   AICoachState copyWith({
     CoachResult? result,
+    CoachResult? displayResult,
+    Rect? roiBounds,
     bool? isEnabled,
     bool? isProcessing,
     AICoachStatus? status,
     List<String>? tags,
     String? recommendedFilter,
+    bool? autoCaptureEnabled,
+    bool? autoCaptureRequested,
   }) {
     return AICoachState(
       result: result ?? this.result,
+      displayResult: displayResult ?? this.displayResult,
+      roiBounds: roiBounds ?? this.roiBounds,
       isEnabled: isEnabled ?? this.isEnabled,
       isProcessing: isProcessing ?? this.isProcessing,
       status: status ?? this.status,
       tags: tags ?? this.tags,
       recommendedFilter: recommendedFilter ?? this.recommendedFilter,
+      autoCaptureEnabled: autoCaptureEnabled ?? this.autoCaptureEnabled,
+      autoCaptureRequested: autoCaptureRequested ?? this.autoCaptureRequested,
     );
   }
 }
@@ -81,6 +98,8 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
       isEnabled: enabled,
       status: enabled ? AICoachStatus.analyzing : AICoachStatus.analyzing,
       tags: enabled ? state.tags : [],
+      roiBounds: enabled ? state.roiBounds : null,
+      autoCaptureRequested: false,
     );
     _frameCounter = 0;
     _isImaggaAnalyzing = false;
@@ -169,7 +188,23 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
           newStatus = AICoachStatus.finished;
         }
 
-        state = state.copyWith(result: result, status: newStatus);
+        if (newStatus == AICoachStatus.finished && state.status != AICoachStatus.finished) {
+          HapticFeedback.mediumImpact();
+        }
+
+        final displayResult = _smoothResult(state.displayResult, result);
+        final bool shouldRequestAutoCapture =
+            state.autoCaptureEnabled &&
+            result.score >= 85 &&
+            newStatus == AICoachStatus.finished;
+
+        state = state.copyWith(
+          result: result,
+          displayResult: displayResult,
+          roiBounds: result.subjectBounds,
+          status: newStatus,
+          autoCaptureRequested: shouldRequestAutoCapture,
+        );
 
         // Luôn xử lý zoom dựa trên điểm số thực tế
         if (result.subjectCenter != null) {
@@ -185,6 +220,9 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
 
   void _handleAutoZoom(CoachResult result) {
     if (result.subjectCenter == null || result.imageSize == Size.zero) return;
+
+    final settings = _ref.read(settingsProvider);
+    if (!settings.autoZoom) return;
 
     // Sử dụng ngưỡng điểm số cao và ổn định hơn để tránh giật
     if (result.score >= 88) {
@@ -203,11 +241,55 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
     }
   }
 
+  void setRoiBounds(Rect? bounds) {
+    if (bounds == state.roiBounds) return;
+    state = state.copyWith(roiBounds: bounds);
+  }
+
+  void toggleAutoCapture() {
+    state = state.copyWith(
+      autoCaptureEnabled: !state.autoCaptureEnabled,
+      autoCaptureRequested: false,
+    );
+  }
+
+  void clearAutoCaptureRequest() {
+    if (!state.autoCaptureRequested) return;
+    state = state.copyWith(autoCaptureRequested: false);
+  }
+
+  CoachResult _smoothResult(CoachResult previous, CoachResult next) {
+    if (previous.subjectCenter == null || next.subjectCenter == null) {
+      return next;
+    }
+
+    final smoothCenter = Offset.lerp(
+      previous.subjectCenter,
+      next.subjectCenter,
+      0.22,
+    )!;
+    final smoothBounds =
+        Rect.lerp(previous.subjectBounds, next.subjectBounds, 0.18) ??
+        next.subjectBounds;
+
+    return CoachResult(
+      subjectBounds: smoothBounds,
+      subjectCenter: smoothCenter,
+      horizonAngle: next.horizonAngle,
+      instruction: next.instruction,
+      score: next.score,
+      isBalanced: next.isBalanced,
+      metrics: next.metrics,
+      imageSize: next.imageSize,
+    );
+  }
+
   Future<void> _triggerImaggaAnalysis() async {
     if (_isImaggaAnalyzing ||
         _lastController == null ||
-        _lastController!.value.isTakingPicture)
+        _lastController!.value.isTakingPicture) {
       return;
+    }
     _isImaggaAnalyzing = true;
 
     try {
@@ -246,18 +328,21 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
     final lowerTags = tags.map((t) => t.toLowerCase()).toList();
     if (lowerTags.any(
       (t) => t.contains('nature') || t.contains('tree') || t.contains('grass'),
-    ))
+    )) {
       return 'Summer Fresh';
-    if (lowerTags.any((t) => t.contains('food') || t.contains('drink')))
+    }
+    if (lowerTags.any((t) => t.contains('food') || t.contains('drink'))) {
       return 'Vivid Food';
+    }
     if (lowerTags.any(
       (t) =>
           t.contains('person') ||
           t.contains('face') ||
           t.contains('man') ||
           t.contains('woman'),
-    ))
+    )) {
       return 'Soft Portrait';
+    }
     return 'Classic F16';
   }
 

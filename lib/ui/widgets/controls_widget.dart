@@ -1,10 +1,15 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:project/providers/ai_coach_provider.dart';
 import 'package:project/providers/camera_provider.dart';
+import 'package:project/providers/sensor_provider.dart';
+import 'package:project/services/capture_service.dart';
+import 'package:project/services/database_service.dart';
+import 'package:project/providers/settings_provider.dart';
 import 'package:project/ui/photo_preview_screen.dart';
 import 'package:project/ui/result_screen.dart';
-import 'package:project/services/database_service.dart';
 
 class ControlsWidget extends ConsumerWidget {
   const ControlsWidget({super.key});
@@ -16,6 +21,13 @@ class ControlsWidget extends ConsumerWidget {
     final statusText = aiState.isEnabled
         ? _statusLabel(aiState.status)
         : 'AI TẮT';
+
+    final autoCaptureRequested = aiState.autoCaptureRequested;
+    if (autoCaptureRequested) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _handleAutoCapture(ref, context);
+      });
+    }
 
     return Container(
       color: Colors.black,
@@ -37,7 +49,59 @@ class ControlsWidget extends ConsumerWidget {
               fontWeight: FontWeight.bold,
             ),
           ),
-
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: aiState.autoCaptureEnabled
+                      ? const Color(0xFF00FFCC)
+                      : Colors.white10,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: aiState.autoCaptureEnabled
+                        ? const Color(0xFF00FFCC)
+                        : Colors.white12,
+                  ),
+                ),
+                child: GestureDetector(
+                  onTap: () =>
+                      ref.read(aiCoachProvider.notifier).toggleAutoCapture(),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        aiState.autoCaptureEnabled
+                            ? Icons.flash_auto
+                            : Icons.flash_off,
+                        size: 16,
+                        color: aiState.autoCaptureEnabled
+                            ? Colors.black
+                            : Colors.white70,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        aiState.autoCaptureEnabled
+                            ? 'Tự động chụp'
+                            : 'Chạm để tự động',
+                        style: TextStyle(
+                          color: aiState.autoCaptureEnabled
+                              ? Colors.black
+                              : Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 16),
 
           // Main Controls Row
@@ -94,23 +158,35 @@ class ControlsWidget extends ConsumerWidget {
                 Stack(
                   alignment: Alignment.center,
                   children: [
-                    Container(
-                      height: 110,
-                      width: 110,
-                      decoration: const BoxDecoration(
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      height: aiState.status == AICoachStatus.finished ? 120 : 110,
+                      width: aiState.status == AICoachStatus.finished ? 120 : 110,
+                      decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         gradient: RadialGradient(
-                          colors: [Color(0xFF00FFCC), Colors.transparent],
-                          stops: [0.2, 1.0],
+                          colors: [
+                            aiState.status == AICoachStatus.finished
+                                ? const Color(0xFF00FFCC).withValues(alpha: 0.8)
+                                : const Color(0xFF00FFCC),
+                            Colors.transparent
+                          ],
+                          stops: const [0.2, 1.0],
                         ),
                       ),
                     ),
-                    Container(
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
                       height: 90,
                       width: 90,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white24, width: 2),
+                        border: Border.all(
+                          color: aiState.status == AICoachStatus.finished
+                              ? const Color(0xFF00FFCC)
+                              : Colors.white24,
+                          width: aiState.status == AICoachStatus.finished ? 3 : 2,
+                        ),
                       ),
                     ),
                     _CaptureButton(
@@ -118,29 +194,41 @@ class ControlsWidget extends ConsumerWidget {
                         final file = await ref
                             .read(cameraProvider.notifier)
                             .takePicture();
-                        if (file != null && context.mounted) {
-                          final aiResult = ref.read(aiCoachProvider);
-                          await DatabaseService().savePhoto(
-                            path: file.path,
-                            result: aiResult.result,
-                            tags: aiResult.tags,
-                          );
-
+                        if (file == null) {
                           if (context.mounted) {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => ResultScreen(
-                                  imagePath: file.path,
-                                  result: aiResult.result,
-                                ),
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Không thể chụp ảnh.'),
                               ),
                             );
                           }
-                        } else if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Không thể chụp ảnh.'),
+                          return;
+                        }
+
+                        final previewState = ref.read(aiCoachProvider);
+                        final settings = ref.read(settingsProvider);
+                        final captureResult =
+                            await CaptureService.processCapture(
+                              File(file.path),
+                              previewState,
+                              ref.read(sensorProvider).value ?? 0.0,
+                              settings: settings,
+                            );
+
+                        await DatabaseService().savePhoto(
+                          path: captureResult.imageFile.path,
+                          result: captureResult.result,
+                          tags: previewState.tags,
+                        );
+
+                        if (context.mounted) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => ResultScreen(
+                                imagePath: captureResult.imageFile.path,
+                                result: captureResult.result,
+                              ),
                             ),
                           );
                         }
@@ -165,6 +253,41 @@ class ControlsWidget extends ConsumerWidget {
       ),
     );
   }
+
+  Future<void> _handleAutoCapture(WidgetRef ref, BuildContext context) async {
+    final state = ref.read(aiCoachProvider);
+    if (!state.autoCaptureRequested) return;
+
+    ref.read(aiCoachProvider.notifier).clearAutoCaptureRequest();
+    final file = await ref.read(cameraProvider.notifier).takePicture();
+    if (file == null || !context.mounted) return;
+
+    final settings = ref.read(settingsProvider);
+    final captureResult = await CaptureService.processCapture(
+      File(file.path),
+      state,
+      ref.read(sensorProvider).value ?? 0.0,
+      settings: settings,
+    );
+
+    await DatabaseService().savePhoto(
+      path: captureResult.imageFile.path,
+      result: captureResult.result,
+      tags: state.tags,
+    );
+
+    if (!context.mounted) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ResultScreen(
+          imagePath: captureResult.imageFile.path,
+          result: captureResult.result,
+        ),
+      ),
+    );
+  }
 }
 
 class _ZoomSelector extends ConsumerWidget {
@@ -172,29 +295,45 @@ class _ZoomSelector extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final cameraState = ref.watch(cameraProvider);
     final zoomLevels = [0.5, 1, 2, 4, 8];
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
-      children: zoomLevels
-          .map(
-            (z) => Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: GestureDetector(
-                onTap: () =>
-                    ref.read(cameraProvider.notifier).setZoom(z.toDouble()),
-                child: Text(
-                  z == 1 ? "1" : (z < 1 ? ".5" : "${z}x"),
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+      children: zoomLevels.map((z) {
+        final isSelected = cameraState.zoomLevel == z;
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 240),
+            curve: Curves.easeOutQuad,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? const Color.fromRGBO(0, 255, 204, 0.18)
+                  : Colors.white10,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: isSelected ? const Color(0xFF00FFCC) : Colors.white24,
+                width: isSelected ? 2 : 1,
               ),
             ),
-          )
-          .toList(),
+            child: GestureDetector(
+              onTap: () =>
+                  ref.read(cameraProvider.notifier).setZoom(z.toDouble()),
+              child: AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 240),
+                style: TextStyle(
+                  color: isSelected ? Colors.white : Colors.white70,
+                  fontSize: isSelected ? 14 : 13,
+                  fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                ),
+                child: Text(z == 1 ? '1' : (z < 1 ? '.5' : '${z}x')),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 }
@@ -216,7 +355,7 @@ class _CaptureButton extends StatelessWidget {
           color: Colors.white,
           boxShadow: [
             BoxShadow(
-              color: Colors.white.withOpacity(0.35),
+              color: const Color.fromRGBO(255, 255, 255, 0.35),
               blurRadius: 12,
               spreadRadius: 2,
             ),

@@ -21,5 +21,27 @@ class CoachResult {
     this.imageSize = Size.zero,
   });
 
+  CoachResult copyWith({
+    Rect? subjectBounds,
+    Offset? subjectCenter,
+    double? horizonAngle,
+    String? instruction,
+    double? score,
+    bool? isBalanced,
+    Map<String, double>? metrics,
+    Size? imageSize,
+  }) {
+    return CoachResult(
+      subjectBounds: subjectBounds ?? this.subjectBounds,
+      subjectCenter: subjectCenter ?? this.subjectCenter,
+      horizonAngle: horizonAngle ?? this.horizonAngle,
+      instruction: instruction ?? this.instruction,
+      score: score ?? this.score,
+      isBalanced: isBalanced ?? this.isBalanced,
+      metrics: metrics ?? this.metrics,
+      imageSize: imageSize ?? this.imageSize,
+    );
+  }
+
   factory CoachResult.empty() => CoachResult();
 }

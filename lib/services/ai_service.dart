@@ -39,12 +39,13 @@ class AIService {
       );
 
       final metadata = inputImage.metadata;
-      if (metadata == null)
+      if (metadata == null) {
         return CoachResult(
           subjectBounds: bounds,
           subjectCenter: center,
           instruction: 'Đang phân tích...',
         );
+      }
 
       final imgWidth = metadata.size.width;
       final imgHeight = metadata.size.height;
