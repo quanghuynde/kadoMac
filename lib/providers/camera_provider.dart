@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +15,7 @@ class CameraState {
   final bool isInitialized;
   final List<CameraDescription> cameras;
   final int selectedCameraIndex;
+  final double zoomLevel;
   final String? error;
 
   CameraState({
@@ -21,6 +23,7 @@ class CameraState {
     this.isInitialized = false,
     this.cameras = const [],
     this.selectedCameraIndex = 0,
+    this.zoomLevel = 1.0,
     this.error,
   });
 
@@ -29,6 +32,7 @@ class CameraState {
     bool? isInitialized,
     List<CameraDescription>? cameras,
     int? selectedCameraIndex,
+    double? zoomLevel,
     String? error,
   }) {
     return CameraState(
@@ -36,6 +40,7 @@ class CameraState {
       isInitialized: isInitialized ?? this.isInitialized,
       cameras: cameras ?? this.cameras,
       selectedCameraIndex: selectedCameraIndex ?? this.selectedCameraIndex,
+      zoomLevel: zoomLevel ?? this.zoomLevel,
       error: error ?? this.error,
     );
   }
@@ -73,7 +78,11 @@ class CameraNotifier extends StateNotifier<CameraState> {
 
     try {
       await controller.initialize();
-      state = state.copyWith(controller: controller, isInitialized: true);
+      state = state.copyWith(
+        controller: controller,
+        isInitialized: true,
+        zoomLevel: 1.0,
+      );
     } catch (e) {
       state = state.copyWith(error: e.toString());
     }
@@ -86,6 +95,7 @@ class CameraNotifier extends StateNotifier<CameraState> {
     state = state.copyWith(
       isInitialized: false,
       selectedCameraIndex: nextIndex,
+      zoomLevel: 1.0,
     );
 
     await state.controller?.dispose();
@@ -105,15 +115,38 @@ class CameraNotifier extends StateNotifier<CameraState> {
     }
   }
 
+  double _targetZoom = 1.0;
+  bool _isZooming = false;
+
   Future<void> setZoom(double zoom) async {
     if (state.controller == null || !state.isInitialized) return;
     try {
       final maxZoom = await state.controller!.getMaxZoomLevel();
       final minZoom = await state.controller!.getMinZoomLevel();
       final targetZoom = zoom.clamp(minZoom, maxZoom);
-      await state.controller!.setZoomLevel(targetZoom);
+      _targetZoom = targetZoom;
+
+      if (_isZooming) return;
+      _isZooming = true;
+      while (true) {
+        final currentZoom = state.zoomLevel;
+        final difference = _targetZoom - currentZoom;
+        if (difference.abs() < 0.02) {
+          await state.controller!.setZoomLevel(_targetZoom);
+          state = state.copyWith(zoomLevel: _targetZoom);
+          break;
+        }
+
+        final nextZoom =
+            currentZoom + difference.sign * min(0.15, difference.abs());
+        await state.controller!.setZoomLevel(nextZoom);
+        state = state.copyWith(zoomLevel: nextZoom);
+        await Future.delayed(const Duration(milliseconds: 40));
+      }
     } catch (e) {
       debugPrint('Error setting zoom: $e');
+    } finally {
+      _isZooming = false;
     }
   }
 

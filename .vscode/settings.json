@@ -1,0 +1,13 @@
+{
+  "java.configuration.updateBuildConfiguration": "automatic",
+  "java.import.gradle.wrapper.enabled": true,
+  "java.import.gradle.version": "8.14",
+  "java.import.gradle.home": null,
+  "java.import.gradle.arguments": "--no-daemon",
+  "java.project.referencedLibraries": [],
+  "files.watcherExclude": {
+    "**/.dart_tool/**": true,
+    "**/build/**": true,
+    "**/.gradle/**": true
+  }
+}

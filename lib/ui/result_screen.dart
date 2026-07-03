@@ -40,7 +40,9 @@ class ResultScreen extends StatelessWidget {
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
               color: Colors.grey[900],
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(30),
+              ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -51,20 +53,34 @@ class ResultScreen extends StatelessWidget {
                   children: [
                     const Text(
                       'ĐIỂM TỔNG QUAN',
-                      style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 1.2),
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                        letterSpacing: 1.2,
+                      ),
                     ),
                     Text(
                       '${result.score.toStringAsFixed(0)}%',
-                      style: const TextStyle(color: Color(0xFF00FFCC), fontSize: 32, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        color: Color(0xFF00FFCC),
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ],
                 ),
                 const Divider(color: Colors.white10, height: 32),
-                ...result.metrics.entries.map((e) => _buildMetric(e.key, e.value)),
+                ...result.metrics.entries.map(
+                  (e) => _buildMetric(e.key, e.value),
+                ),
                 const SizedBox(height: 24),
                 const Text(
                   'GỢI Ý TỪ AI:',
-                  style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 1.2),
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    letterSpacing: 1.2,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -108,7 +124,10 @@ class ResultScreen extends StatelessWidget {
         children: [
           Expanded(
             flex: 2,
-            child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 14)),
+            child: Text(
+              label,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+            ),
           ),
           Expanded(
             flex: 3,
@@ -123,7 +142,10 @@ class ResultScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          Text('${value.toStringAsFixed(0)}%', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          Text(
+            '${value.toStringAsFixed(0)}%',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
         ],
       ),
     );
@@ -135,17 +157,26 @@ class ResultScreen extends StatelessWidget {
       if (!hasAccess) await Gal.requestAccess();
       await Gal.putImage(imagePath);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã lưu vào bộ sưu tập!')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Đã lưu vào bộ sưu tập!')));
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi khi lưu: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Lỗi khi lưu: $e')));
       }
     }
   }
 
   Future<void> _shareImage() async {
-    await Share.shareXFiles([XFile(imagePath)], text: 'Xem ảnh tôi chụp bằng AI Camera Coach!');
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(imagePath)],
+        text: 'Xem ảnh tôi chụp bằng AI Camera Coach!',
+      ),
+    );
   }
 }
 
@@ -155,13 +186,24 @@ class _ActionButton extends StatelessWidget {
   final VoidCallback onTap;
   final bool isSecondary;
 
-  const _ActionButton({required this.icon, required this.label, required this.onTap, this.isSecondary = false});
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.isSecondary = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     return ElevatedButton.icon(
       icon: Icon(icon, color: Colors.black),
-      label: Text(label, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+      label: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.black,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
       onPressed: onTap,
       style: ElevatedButton.styleFrom(
         backgroundColor: isSecondary ? Colors.white70 : const Color(0xFF00FFCC),
