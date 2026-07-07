@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:project/ui/settings_screen.dart';
 import 'package:project/ui/camera_screen.dart';
 import 'package:project/ui/profile_screen.dart';
+import 'package:project/utils/animation_config.dart';
 
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
@@ -29,7 +30,33 @@ class _MainNavigationState extends State<MainNavigation> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: _screens[_selectedIndex],
+      body: AnimatedSwitcher(
+        duration: AppAnimations.normal,
+        switchInCurve: AppAnimations.easeOutCubic,
+        switchOutCurve: AppAnimations.easeOutCubic,
+        transitionBuilder: (child, animation) {
+          // Slide transition based on direction
+          final isForward = _selectedIndex >= (_selectedIndex == 0 ? 0 : _selectedIndex - 1);
+          final offset = isForward ? const Offset(0.15, 0) : const Offset(-0.15, 0);
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: offset,
+              end: Offset.zero,
+            ).animate(CurvedAnimation(
+              parent: animation,
+              curve: AppAnimations.easeOutCubic,
+            )),
+            child: FadeTransition(
+              opacity: animation,
+              child: child,
+            ),
+          );
+        },
+        child: KeyedSubtree(
+          key: ValueKey(_selectedIndex),
+          child: _screens[_selectedIndex],
+        ),
+      ),
       bottomNavigationBar: BottomNavigationBar(
         items: const <BottomNavigationBarItem>[
           BottomNavigationBarItem(

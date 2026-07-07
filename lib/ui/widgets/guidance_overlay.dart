@@ -1,225 +1,218 @@
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:project/providers/ai_coach_provider.dart';
+import 'package:project/providers/camera_provider.dart';
 import 'package:project/providers/sensor_provider.dart';
 import 'package:project/providers/settings_provider.dart';
 import 'package:project/ui/widgets/overlay_painter.dart';
 
-class GuidanceOverlay extends ConsumerWidget {
+class GuidanceOverlay extends ConsumerStatefulWidget {
   const GuidanceOverlay({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<GuidanceOverlay> createState() => _GuidanceOverlayState();
+}
+
+class _GuidanceOverlayState extends ConsumerState<GuidanceOverlay>
+    with TickerProviderStateMixin {
+  late AnimationController _scanningController;
+  late Animation<double> _scanningAnimation;
+  late AnimationController _frameLockController;
+  late Animation<double> _frameLockAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _scanningController = AnimationController(
+      duration: const Duration(seconds: 2),
+      vsync: this,
+    );
+    _scanningAnimation = CurvedAnimation(
+      parent: _scanningController,
+      curve: Curves.easeInOut,
+    );
+    _scanningController.repeat();
+
+    _frameLockController = AnimationController(
+      duration: const Duration(milliseconds: 1000),
+      vsync: this,
+    );
+    _frameLockAnimation = CurvedAnimation(
+      parent: _frameLockController,
+      curve: Curves.easeOutQuart,
+    );
+  }
+
+  @override
+  void dispose() {
+    _scanningController.dispose();
+    _frameLockController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final aiState = ref.watch(aiCoachProvider);
     final horizonAngle = ref.watch(sensorProvider).value ?? 0.0;
     final settings = ref.watch(settingsProvider);
+    final cameraState = ref.watch(cameraProvider);
 
-    final currentRoi = aiState.result.subjectBounds;
-    if (currentRoi != aiState.roiBounds) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        ref.read(aiCoachProvider.notifier).setRoiBounds(currentRoi);
-      });
+    // Start/stop scanning animation based on status
+    if (aiState.status == AICoachStatus.scanning) {
+      _scanningController.repeat();
+    } else {
+      _scanningController.stop();
     }
 
-    if (aiState.result.subjectBounds != null &&
-        aiState.result.subjectBounds != aiState.roiBounds) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        ref
-            .read(aiCoachProvider.notifier)
-            .setRoiBounds(aiState.result.subjectBounds);
-      });
+    // Reset frame-lock animation when transitioning out of detection states
+    if (aiState.status == AICoachStatus.idle || aiState.status == AICoachStatus.scanning) {
+      if (_frameLockController.value > 0 && !_frameLockController.isAnimating) {
+        _frameLockController.reset();
+        // Reset zoom if it was zoomed by coach (optional, but keep for consistency if zoom was desired)
+        // ref.read(cameraProvider.notifier).setZoom(1.0);
+      }
     }
 
-    final displayResult = aiState.displayResult;
-    if (displayResult.subjectBounds != null &&
-        displayResult.subjectBounds != aiState.roiBounds) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        ref
-            .read(aiCoachProvider.notifier)
-            .setRoiBounds(displayResult.subjectBounds);
-      });
+    // Play frame-lock animation when almost aligned
+    if (aiState.status == AICoachStatus.almostThere &&
+        !_frameLockController.isAnimating && _frameLockController.value == 0) {
+      _frameLockController.forward();
     }
 
-    return Stack(
-      children: [
-        // Grid, Horizon, Ring, Dots
-        CustomPaint(
-          size: Size.infinite,
-          painter: OverlayPainter(
-            result: displayResult,
-            horizonAngle: horizonAngle,
-            showGrid: settings.showGrid && aiState.isEnabled,
-            status: aiState.status,
-          ),
-        ),
+    final sensorOrientation =
+        cameraState.isInitialized && cameraState.cameras.isNotEmpty
+        ? cameraState.cameras[cameraState.selectedCameraIndex].sensorOrientation
+        : 90;
+    final isFrontCamera =
+        cameraState.isInitialized && cameraState.cameras.isNotEmpty
+        ? cameraState.cameras[cameraState.selectedCameraIndex].lensDirection ==
+              CameraLensDirection.front
+        : false;
 
-        // AI Bubble (Top Center - Style Doka)
-        if (aiState.isEnabled)
-          Positioned(
-            top: 50,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: _AIBubble(
-                status: aiState.status,
-                instruction: aiState.result.instruction,
-                score: aiState.result.score,
-              ),
-            ),
-          ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
 
-        // Tag Overlay (Near subject)
-        if (aiState.status == AICoachStatus.finished)
-          const Positioned(
-            bottom: 180,
-            left: 0,
-            right: 0,
-            child: Center(child: _CapturePrompt()),
-          ),
+        return AnimatedBuilder(
+          animation: Listenable.merge([_scanningAnimation, _frameLockAnimation]),
+          builder: (context, child) {
+            final progress = _frameLockAnimation.value;
+            
+            // Define the clip rect based on the framing box
+            // Using dynamic frame if available, otherwise fallback to default
+            final targetFrame = aiState.aiSuggestedFrame;
+            final center = aiState.aiSuggestedCenter != null 
+              ? _translateOffset(aiState.aiSuggestedCenter!, viewportSize, aiState.result.imageSize, sensorOrientation, isFrontCamera)
+              : Offset(viewportSize.width / 2, viewportSize.height / 2);
+            
+            final double initialSize = 80.0;
+            final double finalWidth = targetFrame != null 
+              ? _translateX(targetFrame.width, viewportSize, aiState.result.imageSize, sensorOrientation)
+              : 240.0;
+            final double finalHeight = targetFrame != null 
+              ? _translateY(targetFrame.height, viewportSize, aiState.result.imageSize, sensorOrientation)
+              : 240.0;
 
-        // Tags list (Side)
-        if (aiState.tags.isNotEmpty)
-          Positioned(left: 20, top: 150, child: _TagCloud(tags: aiState.tags)),
-      ],
-    );
-  }
-}
+            final currentWidth = initialSize + (finalWidth - initialSize) * progress;
+            final currentHeight = initialSize + (finalHeight - initialSize) * progress;
 
-class _AIBubble extends StatelessWidget {
-  final AICoachStatus status;
-  final String instruction;
-  final double score;
-
-  const _AIBubble({
-    required this.status,
-    required this.instruction,
-    required this.score,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    String title = "AI đang phân tích...";
-    String subtitle = "Vui lòng giữ im máy, không di chuyển";
-
-    if (status == AICoachStatus.guiding) {
-      title = "Căn chỉnh bố cục";
-      subtitle = instruction.isNotEmpty ? instruction : "Hãy đưa chủ thể vào vòng tròn";
-    } else if (status == AICoachStatus.finished) {
-      title = "Bố cục đẹp";
-      subtitle = "Sẵn sàng chụp";
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: Colors.white10, width: 0.5),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              if (status != AICoachStatus.analyzing) ...[
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: status == AICoachStatus.finished
-                        ? const Color(0xFF00FFCC)
-                        : Colors.white24,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    "${score.toInt()}%",
-                    style: TextStyle(
-                      color: status == AICoachStatus.finished
-                          ? Colors.black
-                          : Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                // Viewport Mask (Darkens the area outside the framing box)
+                if (progress > 0)
+                  ClipPath(
+                    clipper: InvertedRectClipper(
+                      center: center,
+                      width: currentWidth,
+                      height: currentHeight,
+                      borderRadius: 24.0,
                     ),
+                    child: Container(
+                      color: Colors.black.withValues(alpha: 0.95 * progress),
+                    ),
+                  ),
+                
+                CustomPaint(
+                  size: Size.infinite,
+                  painter: OverlayPainter(
+                    result: aiState.displayResult,
+                    horizonAngle: horizonAngle,
+                    showGrid: settings.showGrid,
+                    status: aiState.status,
+                    sensorOrientation: sensorOrientation,
+                    isFrontCamera: isFrontCamera,
+                    aiSuggestedFrame: aiState.aiSuggestedFrame,
+                    aiSuggestedCenter: aiState.aiSuggestedCenter,
+                    scanningProgress: _scanningAnimation.value,
+                    frameLockProgress: _frameLockAnimation.value,
                   ),
                 ),
               ],
-            ],
-          ),
-          const SizedBox(height: 6),
-          Text(
-            subtitle,
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
-        ],
-      ),
+            );
+          },
+        );
+      },
     );
+  }
+
+  double _translateX(double x, Size canvasSize, Size imageSize, int sensorOrientation) {
+    if (imageSize == Size.zero) return x;
+    if (sensorOrientation == 90 || sensorOrientation == 270) {
+      return x * canvasSize.width / imageSize.height;
+    } else {
+      return x * canvasSize.width / imageSize.width;
+    }
+  }
+
+  double _translateY(double y, Size canvasSize, Size imageSize, int sensorOrientation) {
+    if (imageSize == Size.zero) return y;
+    if (sensorOrientation == 90 || sensorOrientation == 270) {
+      return y * canvasSize.height / imageSize.width;
+    } else {
+      return y * canvasSize.height / imageSize.height;
+    }
+  }
+
+  // Duplicate coordinate translation logic to calculate clip center
+  Offset _translateOffset(Offset offset, Size canvasSize, Size imageSize, int sensorOrientation, bool isFrontCamera) {
+    if (imageSize == Size.zero) return offset;
+    double calculatedX = _translateX(offset.dx, canvasSize, imageSize, sensorOrientation);
+    double calculatedY = _translateY(offset.dy, canvasSize, imageSize, sensorOrientation);
+
+    if (isFrontCamera) {
+      calculatedX = canvasSize.width - calculatedX;
+    }
+    
+    return Offset(calculatedX, calculatedY);
   }
 }
 
-class _CapturePrompt extends StatelessWidget {
-  const _CapturePrompt();
+class InvertedRectClipper extends CustomClipper<Path> {
+  final Offset center;
+  final double width;
+  final double height;
+  final double borderRadius;
+
+  InvertedRectClipper({
+    required this.center,
+    required this.width,
+    required this.height,
+    required this.borderRadius,
+  });
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFF00FFCC), // Đổi sang xanh khi khớp
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF00FFCC).withValues(alpha: 0.4),
-            blurRadius: 10,
-          ),
-        ],
-      ),
-      child: const Text(
-        "ĐÃ KHÓA BỐ CỤC",
-        style: TextStyle(
-          color: Colors.black,
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
+  Path getClip(Size size) {
+    final path = Path()..addRect(Rect.fromLTWH(0, 0, size.width, size.height));
+    
+    final holeRect = Rect.fromCenter(center: center, width: this.width, height: this.height);
+    final holePath = Path()..addRRect(RRect.fromRectAndRadius(holeRect, Radius.circular(borderRadius)));
+    
+    return Path.combine(PathOperation.difference, path, holePath);
   }
-}
-
-class _TagCloud extends StatelessWidget {
-  final List<String> tags;
-  const _TagCloud({required this.tags});
 
   @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: tags
-          .map(
-            (tag) => Padding(
-              padding: const EdgeInsets.only(bottom: 4.0),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.38),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  tag,
-                  style: const TextStyle(color: Colors.white, fontSize: 10),
-                ),
-              ),
-            ),
-          )
-          .toList(),
-    );
-  }
+  bool shouldReclip(covariant InvertedRectClipper oldClipper) => 
+    center != oldClipper.center || width != oldClipper.width || height != oldClipper.height || borderRadius != oldClipper.borderRadius;
 }

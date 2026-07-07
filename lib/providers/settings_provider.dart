@@ -11,8 +11,10 @@ class SettingsState {
     this.autoZoom = true,
     this.showGrid = true,
     this.useOpenAIVision = true,
-    this.openAIApiKey = '',
+    this.openAIApiKey = _kDefaultApiKey,
   });
+  
+  static const String _kDefaultApiKey = '';
 
   SettingsState copyWith({
     bool? autoZoom,
@@ -46,7 +48,7 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
         autoZoom: prefs.getBool(_autoZoomKey) ?? true,
         showGrid: prefs.getBool(_showGridKey) ?? true,
         useOpenAIVision: prefs.getBool(_useOpenAIVisionKey) ?? true,
-        openAIApiKey: prefs.getString(_openAIApiKeyKey) ?? '',
+        openAIApiKey: prefs.getString(_openAIApiKeyKey) ?? SettingsState._kDefaultApiKey,
       );
     } catch (e) {
       // In case of error (e.g. testing context) use defaults

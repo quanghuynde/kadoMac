@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:ui';
 import 'package:google_mlkit_object_detection/google_mlkit_object_detection.dart';
 import 'package:project/models/coach_result.dart';
@@ -12,7 +13,7 @@ class AIService {
   void _initialize() {
     final options = ObjectDetectorOptions(
       mode: DetectionMode.stream,
-      classifyObjects: false,
+      classifyObjects: true,
       multipleObjects: true,
     );
     _objectDetector = ObjectDetector(options: options);
@@ -23,7 +24,7 @@ class AIService {
       final objects = await _objectDetector.processImage(inputImage);
 
       if (objects.isEmpty) {
-        return CoachResult(instruction: 'Đang tìm chủ thể...');
+        return CoachResult(instruction: 'Analyzing...');
       }
 
       final mainSubject = objects.reduce((a, b) {
@@ -39,117 +40,63 @@ class AIService {
       );
 
       final metadata = inputImage.metadata;
-      if (metadata == null) {
-        return CoachResult(
-          subjectBounds: bounds,
-          subjectCenter: center,
-          instruction: 'Đang phân tích...',
-        );
-      }
+      final imgWidth = metadata?.size.width ?? 0;
+      final imgHeight = metadata?.size.height ?? 0;
 
-      final imgWidth = metadata.size.width;
-      final imgHeight = metadata.size.height;
+      // Crosshair alignment
+      final crosshairPos = Offset(imgWidth / 2, imgHeight / 2);
+      final dx = center.dx - crosshairPos.dx;
+      final dy = center.dy - crosshairPos.dy;
+      final distance = sqrt(dx * dx + dy * dy);
+      final threshold = imgWidth * 0.08;
+      final isLocked = distance < threshold;
 
-      return _analyzeComposition(center, bounds, imgWidth, imgHeight);
-    } catch (e) {
-      return CoachResult(instruction: 'Lỗi: ${e.toString()}');
-    }
-  }
-
-  CoachResult _analyzeComposition(
-    Offset center,
-    Rect bounds,
-    double width,
-    double height,
-  ) {
-    // 1. Rule of Thirds Points
-    final tx1 = width / 3;
-    final tx2 = 2 * width / 3;
-    final ty1 = height / 3;
-    final ty2 = 2 * height / 3;
-
-    // 2. Center Point (for Symmetry)
-    final cx = width / 2;
-    final cy = height / 2;
-
-    // 3. Golden Ratio Points (Phi Grid - approx 0.38 / 0.62)
-    final gx1 = width * 0.382;
-    final gx2 = width * 0.618;
-    final gy1 = height * 0.382;
-    final gy2 = height * 0.618;
-
-    final targetPoints = [
-      Offset(tx1, ty1),
-      Offset(tx2, ty1),
-      Offset(tx1, ty2),
-      Offset(tx2, ty2), // 1/3
-      Offset(cx, cy), // Center
-      Offset(gx1, gy1),
-      Offset(gx2, gy1),
-      Offset(gx1, gy2),
-      Offset(gx2, gy2), // Golden
-    ];
-
-    // Priority logic: If subject is very large, prefer Center (Symmetry)
-    double subjectSizeRatio = (bounds.width * bounds.height) / (width * height);
-    Offset nearestPoint;
-    double minDist;
-
-    if (subjectSizeRatio > 0.45) {
-      nearestPoint = Offset(cx, cy);
-      minDist = (center - nearestPoint).distance;
-    } else {
-      // Tìm điểm gần nhất nhưng cho phép một sai số (hysteresis)
-      nearestPoint = targetPoints[0];
-      minDist = (center - targetPoints[0]).distance;
-
-      for (var point in targetPoints) {
-        double dist = (center - point).distance;
-        if (dist < minDist * 0.85) {
-          // Chỉ đổi mục tiêu nếu điểm mới gần hơn ít nhất 15%
-          minDist = dist;
-          nearestPoint = point;
+      // Direction hint
+      String directionHint = '';
+      if (!isLocked && distance > 5.0) {
+        if (distance < imgWidth * 0.10) {
+          directionHint = 'Gần đến rồi...';
+        } else {
+          final hints = <String>[];
+          if (dy.abs() > imgWidth * 0.03) {
+            hints.add(dy > 0 ? 'Di chuyển xuống' : 'Di chuyển lên');
+          }
+          if (dx.abs() > imgWidth * 0.03) {
+            hints.add(dx > 0 ? 'Di chuyển phải' : 'Di chuyển trái');
+          }
+          final subjectSizeRatio =
+              (bounds.width * bounds.height) / (imgWidth * imgHeight);
+          if (subjectSizeRatio < 0.03) {
+            hints.add('Di chuyển lại gần');
+          } else if (subjectSizeRatio > 0.5) {
+            hints.add('Di chuyển xa');
+          }
+          directionHint = hints.join(', ');
         }
       }
-    }
 
-    String instruction = 'Bố cục hoàn hảo!';
-    if (minDist > width * 0.1) {
-      final dx = nearestPoint.dx - center.dx;
-      final dy = nearestPoint.dy - center.dy;
-
-      if (dx.abs() > dy.abs()) {
-        instruction = dx > 0 ? 'Dịch sang phải' : 'Dịch sang trái';
+      String instruction;
+      if (isLocked) {
+        instruction = 'Đã khóa mục tiêu';
+      } else if (directionHint.isNotEmpty) {
+        instruction = directionHint;
       } else {
-        instruction = dy > 0 ? 'Dịch xuống dưới' : 'Dịch lên trên';
+        instruction = 'Aim at the colored ring';
       }
+
+      return CoachResult(
+        subjectBounds: bounds,
+        subjectCenter: center,
+        instruction: instruction,
+        imageSize: Size(imgWidth, imgHeight),
+        objectName: '',
+        isTargetLocked: isLocked,
+        directionHint: directionHint,
+      );
+    } catch (e) {
+      return CoachResult(instruction: 'Error: ${e.toString()}');
     }
-
-    double compositionScore =
-        (1.0 - (minDist / (width / 2))).clamp(0.0, 1.0) * 100;
-
-    if (subjectSizeRatio < 0.05) {
-      instruction = 'Lại gần hơn';
-      compositionScore *= 0.8;
-    } else if (subjectSizeRatio > 0.6) {
-      instruction = 'Lùi xa ra';
-      compositionScore *= 0.8;
-    }
-
-    return CoachResult(
-      subjectBounds: bounds,
-      subjectCenter: center,
-      instruction: instruction,
-      score: compositionScore,
-      imageSize: Size(width, height),
-      metrics: {
-        'Quy tắc 1/3': compositionScore,
-        'Kích thước chủ thể': subjectSizeRatio * 100,
-      },
-    );
   }
 
-  void dispose() {
-    _objectDetector.close();
-  }
+  void dispose() => _objectDetector.close();
 }

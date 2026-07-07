@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'dart:math';
+import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +17,11 @@ class CameraState {
   final int selectedCameraIndex;
   final double zoomLevel;
   final String? error;
+  final FlashMode flashMode;
+  final Duration timerDuration;
+  final String aspectRatio;
+
+  final bool isHdrEnabled;
 
   CameraState({
     this.controller,
@@ -25,6 +30,10 @@ class CameraState {
     this.selectedCameraIndex = 0,
     this.zoomLevel = 1.0,
     this.error,
+    this.flashMode = FlashMode.off,
+    this.timerDuration = Duration.zero,
+    this.aspectRatio = '3:4',
+    this.isHdrEnabled = false,
   });
 
   CameraState copyWith({
@@ -34,6 +43,10 @@ class CameraState {
     int? selectedCameraIndex,
     double? zoomLevel,
     String? error,
+    FlashMode? flashMode,
+    Duration? timerDuration,
+    String? aspectRatio,
+    bool? isHdrEnabled,
   }) {
     return CameraState(
       controller: controller ?? this.controller,
@@ -42,6 +55,10 @@ class CameraState {
       selectedCameraIndex: selectedCameraIndex ?? this.selectedCameraIndex,
       zoomLevel: zoomLevel ?? this.zoomLevel,
       error: error ?? this.error,
+      flashMode: flashMode ?? this.flashMode,
+      timerDuration: timerDuration ?? this.timerDuration,
+      aspectRatio: aspectRatio ?? this.aspectRatio,
+      isHdrEnabled: isHdrEnabled ?? this.isHdrEnabled,
     );
   }
 }
@@ -115,39 +132,135 @@ class CameraNotifier extends StateNotifier<CameraState> {
     }
   }
 
-  double _targetZoom = 1.0;
-  bool _isZooming = false;
-
   Future<void> setZoom(double zoom) async {
     if (state.controller == null || !state.isInitialized) return;
     try {
       final maxZoom = await state.controller!.getMaxZoomLevel();
       final minZoom = await state.controller!.getMinZoomLevel();
       final targetZoom = zoom.clamp(minZoom, maxZoom);
-      _targetZoom = targetZoom;
-
-      if (_isZooming) return;
-      _isZooming = true;
-      while (true) {
-        final currentZoom = state.zoomLevel;
-        final difference = _targetZoom - currentZoom;
-        if (difference.abs() < 0.02) {
-          await state.controller!.setZoomLevel(_targetZoom);
-          state = state.copyWith(zoomLevel: _targetZoom);
-          break;
-        }
-
-        final nextZoom =
-            currentZoom + difference.sign * min(0.15, difference.abs());
-        await state.controller!.setZoomLevel(nextZoom);
-        state = state.copyWith(zoomLevel: nextZoom);
-        await Future.delayed(const Duration(milliseconds: 40));
-      }
+      await state.controller!.setZoomLevel(targetZoom);
+      state = state.copyWith(zoomLevel: targetZoom);
     } catch (e) {
       debugPrint('Error setting zoom: $e');
-    } finally {
-      _isZooming = false;
     }
+  }
+
+  /// Smart Zoom: Now immediate for faster feedback
+  Future<void> smartZoom(double targetZoom) async {
+    if (state.controller == null || !state.isInitialized) return;
+    await setZoom(targetZoom);
+  }
+
+  /// Set exposure compensation (EV) if supported
+  Future<void> setExposure(double ev) async {
+    if (state.controller == null || !state.isInitialized) return;
+    try {
+      final clamped = ev.clamp(
+        state.controller!.description.lensDirection == CameraLensDirection.back
+            ? -2.0
+            : -1.5,
+        2.0,
+      );
+      await state.controller!.setExposureOffset(clamped);
+    } catch (e) {
+      debugPrint('Exposure control not supported: $e');
+    }
+  }
+
+  Future<void> setExposureFromTap(double normalized) async {
+    if (state.controller == null || !state.isInitialized) return;
+    try {
+      final minOffset = await state.controller!.getMinExposureOffset();
+      final maxOffset = await state.controller!.getMaxExposureOffset();
+      final targetOffset = lerpDouble(minOffset, maxOffset, normalized) ?? 0.0;
+      await state.controller!.setExposureOffset(
+        targetOffset.clamp(minOffset, maxOffset),
+      );
+    } catch (e) {
+      debugPrint('Error setting exposure from tap: $e');
+    }
+  }
+
+  /// Auto exposure lock
+  Future<void> setAutoExposure(bool lock) async {
+    if (state.controller == null || !state.isInitialized) return;
+    try {
+      await state.controller!.setExposureMode(
+        lock ? ExposureMode.locked : ExposureMode.auto,
+      );
+    } catch (e) {
+      debugPrint('Auto exposure not supported: $e');
+    }
+  }
+
+  Future<void> lockFocusAndExposure() async {
+    if (state.controller == null || !state.isInitialized) return;
+    try {
+      await state.controller!.setFocusMode(FocusMode.locked);
+      await state.controller!.setExposureMode(ExposureMode.locked);
+    } catch (e) {
+      debugPrint('Error locking focus/exposure: $e');
+    }
+  }
+
+  Future<void> resetFocusAndExposure() async {
+    if (state.controller == null || !state.isInitialized) return;
+    try {
+      await state.controller!.setFocusMode(FocusMode.auto);
+      await state.controller!.setExposureMode(ExposureMode.auto);
+    } catch (e) {
+      debugPrint('Error resetting focus/exposure: $e');
+    }
+  }
+
+  /// Toggle flash: Off -> Auto -> Always (On) -> Off
+  Future<void> toggleFlash() async {
+    if (state.controller == null || !state.isInitialized) return;
+    
+    final newMode = state.flashMode == FlashMode.off
+        ? FlashMode.auto
+        : state.flashMode == FlashMode.auto
+            ? FlashMode.always
+            : FlashMode.off;
+
+    try {
+      await state.controller!.setFlashMode(newMode);
+      state = state.copyWith(flashMode: newMode);
+    } catch (e) {
+      debugPrint('Error toggling flash: $e');
+    }
+  }
+
+  /// Toggle HDR state
+  Future<void> toggleHdr() async {
+    state = state.copyWith(isHdrEnabled: !state.isHdrEnabled);
+  }
+
+  /// Set flash mode
+  Future<void> setFlashMode(FlashMode mode) async {
+    if (state.controller == null || !state.isInitialized) return;
+    try {
+      await state.controller!.setFlashMode(mode);
+      state = state.copyWith(flashMode: mode);
+    } catch (e) {
+      debugPrint('Error setting flash mode: $e');
+    }
+  }
+
+  /// Set timer duration
+  Future<void> setTimer(Duration duration) async {
+    state = state.copyWith(timerDuration: duration);
+  }
+
+  Future<void> setAspectRatio(String ratio) async {
+    state = state.copyWith(aspectRatio: ratio);
+  }
+
+  void cycleAspectRatio() {
+    const ratios = ['3:4', '1:1', '16:9', 'Full'];
+    final currentIndex = ratios.indexOf(state.aspectRatio);
+    final nextIndex = (currentIndex + 1) % ratios.length;
+    state = state.copyWith(aspectRatio: ratios[nextIndex]);
   }
 
   @override
@@ -156,3 +269,10 @@ class CameraNotifier extends StateNotifier<CameraState> {
     super.dispose();
   }
 }
+
+final selfTimerProvider = StateProvider<int>(
+  (ref) => 0,
+); // Self-timer: 0, 3, 5, or 10 seconds
+final countdownProvider = StateProvider<int>(
+  (ref) => 0,
+); // Active countdown seconds: 0 when inactive
