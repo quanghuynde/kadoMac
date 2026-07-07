@@ -2,8 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:project/models/coach_result.dart';
 import 'package:project/providers/ai_coach_provider.dart';
-import 'package:project/providers/settings_provider.dart';
-import 'package:project/services/openai_vision_service.dart';
 import 'package:project/services/image_crop_service.dart';
 import 'package:project/services/vision_service.dart';
 
@@ -12,67 +10,59 @@ class CaptureService {
     File file,
     AICoachState previewState,
     double sensorAngle, {
-    SettingsState? settings,
+    bool cropToSubject = true,
   }) async {
     CoachResult analysisResult;
 
-    if (settings != null &&
-        settings.useOpenAIVision &&
-        settings.openAIApiKey.isNotEmpty) {
-      analysisResult = await OpenAIVisionService.instance.evaluateLayout(
-        file,
-        settings.openAIApiKey,
+    analysisResult = await VisionService.instance.analyzeCapture(
+      file,
+      sensorAngle: sensorAngle,
+    );
+
+    // Dynamic crop box mapping
+    final Rect? baseFrame = previewState.aiSuggestedFrame ?? previewState.result.subjectBounds;
+    final Size imgSize = previewState.result.imageSize.width > 0
+        ? previewState.result.imageSize
+        : analysisResult.imageSize;
+
+    File resultFile = file;
+    if (cropToSubject && baseFrame != null && imgSize != Size.zero) {
+      // Apply 20% margin padding to prevent cut offs
+      final padW = baseFrame.width * 0.20;
+      final padH = baseFrame.height * 0.20;
+      final paddedFrame = Rect.fromLTRB(
+        (baseFrame.left - padW).clamp(0.0, imgSize.width),
+        (baseFrame.top - padH).clamp(0.0, imgSize.height),
+        (baseFrame.right + padW).clamp(0.0, imgSize.width),
+        (baseFrame.bottom + padH).clamp(0.0, imgSize.height),
       );
-    } else {
-      analysisResult = await VisionService.instance.analyzeCapture(
+
+      final croppedFile = await ImageCropService.cropImageFile(
         file,
-        sensorAngle: sensorAngle,
+        paddedFrame,
+        imgSize,
       );
+      if (croppedFile != null) {
+        resultFile = croppedFile;
+      }
     }
 
-    final roiBounds =
-        previewState.roiBounds ??
-        analysisResult.subjectBounds ??
-        previewState.result.subjectBounds ??
-        Rect.fromLTWH(
-          0,
-          0,
-          analysisResult.imageSize.width > 0
-              ? analysisResult.imageSize.width
-              : previewState.result.imageSize.width > 0
-                  ? previewState.result.imageSize.width
-                  : 1080.0,
-          analysisResult.imageSize.height > 0
-              ? analysisResult.imageSize.height
-              : previewState.result.imageSize.height > 0
-                  ? previewState.result.imageSize.height
-                  : 1920.0,
-        );
-
-    final cropSourceSize = previewState.roiBounds != null
-        ? previewState.result.imageSize
-        : (analysisResult.imageSize.width > 0 &&
-                  analysisResult.imageSize.height > 0
-              ? analysisResult.imageSize
-              : previewState.result.imageSize);
-
-    final croppedFile = await ImageCropService.cropImageFile(
-      file,
-      roiBounds,
-      cropSourceSize,
+    // Merge preview object info
+    final mergedResult = CoachResult(
+      subjectBounds: baseFrame,
+      subjectCenter: previewState.result.subjectCenter,
+      imageSize: analysisResult.imageSize,
+      objectName: previewState.result.objectName,
+      instruction: analysisResult.instruction,
+      horizonAngle: sensorAngle,
     );
 
     return CaptureResult(
-      imageFile: croppedFile ?? file,
-      result: previewState.roiBounds != null
-          ? previewState.result.copyWith(
-              score: analysisResult.score,
-              instruction: analysisResult.instruction,
-              metrics: analysisResult.metrics,
-            )
-          : analysisResult,
+      imageFile: resultFile,
+      result: mergedResult,
     );
   }
+
 }
 
 class CaptureResult {

@@ -21,6 +21,23 @@ class DatabaseService {
       path,
       version: 1,
       onCreate: _onCreate,
+      onOpen: (db) async {
+        final columns = [
+          'brightness',
+          'exposure',
+          'contrast',
+          'temperature',
+          'saturation',
+          'fade'
+        ];
+        for (var col in columns) {
+          try {
+            await db.execute('ALTER TABLE photos ADD COLUMN $col REAL DEFAULT 0.0');
+          } catch (e) {
+            // Column already exists
+          }
+        }
+      },
     );
   }
 
@@ -33,7 +50,13 @@ class DatabaseService {
         composition_score REAL,
         tags TEXT,
         instruction TEXT,
-        timestamp TEXT
+        timestamp TEXT,
+        brightness REAL DEFAULT 0.0,
+        exposure REAL DEFAULT 0.0,
+        contrast REAL DEFAULT 0.0,
+        temperature REAL DEFAULT 0.0,
+        saturation REAL DEFAULT 0.0,
+        fade REAL DEFAULT 0.0
       )
     ''');
 
@@ -55,11 +78,17 @@ class DatabaseService {
     final db = await database;
     return await db.insert('photos', {
       'path': path,
-      'overall_score': result.score,
-      'composition_score': result.metrics['Quy tắc 1/3'] ?? 0.0,
+      'overall_score': 0.0,
+      'composition_score': 0.0,
       'tags': tags.join(','),
       'instruction': result.instruction,
       'timestamp': DateTime.now().toIso8601String(),
+      'brightness': 0.0,
+      'exposure': 0.0,
+      'contrast': 0.0,
+      'temperature': 0.0,
+      'saturation': 0.0,
+      'fade': 0.0,
     });
   }
 
@@ -67,6 +96,38 @@ class DatabaseService {
   Future<List<Map<String, dynamic>>> getPhotoHistory() async {
     final db = await database;
     return await db.query('photos', orderBy: 'timestamp DESC');
+  }
+
+  // Delete a photo by ID
+  Future<int> deletePhoto(int id) async {
+    final db = await database;
+    return await db.delete('photos', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // Update photo adjustments
+  Future<int> updatePhotoAdjustments(
+    int id, {
+    required double brightness,
+    required double exposure,
+    required double contrast,
+    required double temperature,
+    required double saturation,
+    required double fade,
+  }) async {
+    final db = await database;
+    return await db.update(
+      'photos',
+      {
+        'brightness': brightness,
+        'exposure': exposure,
+        'contrast': contrast,
+        'temperature': temperature,
+        'saturation': saturation,
+        'fade': fade,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   // Get statistics for progress screen

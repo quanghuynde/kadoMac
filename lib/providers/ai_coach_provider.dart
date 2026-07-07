@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -7,77 +6,75 @@ import 'package:google_mlkit_object_detection/google_mlkit_object_detection.dart
 import 'package:project/models/coach_result.dart';
 import 'package:project/providers/camera_provider.dart';
 import 'package:project/services/ai_service.dart';
-import 'package:project/services/imagga_service.dart';
-import 'package:project/providers/settings_provider.dart';
+import 'package:project/utils/one_euro_filter.dart';
 
-enum AICoachStatus { analyzing, guiding, adjusted, finished }
+/// State machine for subject tracking
+enum AICoachStatus {
+  idle,         
+  scanning,     
+  frameFound,   
+  almostThere,  
+}
 
 class AICoachState {
   final CoachResult result;
   final CoachResult displayResult;
-  final Rect? roiBounds;
   final bool isEnabled;
-  final bool isProcessing;
   final AICoachStatus status;
-  final List<String> tags;
-  final String? recommendedFilter;
-  final bool autoCaptureEnabled;
-  final bool autoCaptureRequested;
+
+  final Rect? aiSuggestedFrame;
+  final Offset? aiSuggestedCenter; 
 
   AICoachState({
     required this.result,
     CoachResult? displayResult,
-    this.roiBounds,
-    this.isEnabled = true,
-    this.isProcessing = false,
-    this.status = AICoachStatus.analyzing,
-    this.tags = const [],
-    this.recommendedFilter,
-    this.autoCaptureEnabled = false,
-    this.autoCaptureRequested = false,
+    this.isEnabled = false,
+    this.status = AICoachStatus.idle,
+    this.aiSuggestedFrame,
+    this.aiSuggestedCenter,
   }) : displayResult = displayResult ?? result;
 
   AICoachState copyWith({
     CoachResult? result,
     CoachResult? displayResult,
-    Rect? roiBounds,
     bool? isEnabled,
-    bool? isProcessing,
     AICoachStatus? status,
-    List<String>? tags,
-    String? recommendedFilter,
-    bool? autoCaptureEnabled,
-    bool? autoCaptureRequested,
+    Rect? aiSuggestedFrame,
+    Offset? aiSuggestedCenter,
   }) {
     return AICoachState(
       result: result ?? this.result,
       displayResult: displayResult ?? this.displayResult,
-      roiBounds: roiBounds ?? this.roiBounds,
       isEnabled: isEnabled ?? this.isEnabled,
-      isProcessing: isProcessing ?? this.isProcessing,
       status: status ?? this.status,
-      tags: tags ?? this.tags,
-      recommendedFilter: recommendedFilter ?? this.recommendedFilter,
-      autoCaptureEnabled: autoCaptureEnabled ?? this.autoCaptureEnabled,
-      autoCaptureRequested: autoCaptureRequested ?? this.autoCaptureRequested,
+      aiSuggestedFrame: aiSuggestedFrame ?? this.aiSuggestedFrame,
+      aiSuggestedCenter: aiSuggestedCenter ?? this.aiSuggestedCenter,
     );
   }
 }
 
 class AICoachNotifier extends StateNotifier<AICoachState> {
   final AIService _aiService = AIService();
-  final ImaggaService _imaggaService = ImaggaService();
   final Ref _ref;
   bool _isBusy = false;
-  bool _isImaggaAnalyzing = false;
   bool _isStreaming = false;
   DateTime _lastProcessTime = DateTime.now();
   CameraController? _lastController;
-  double _currentZoom = 1.0;
   int _frameCounter = 0;
+  int _stableDetectCount = 0;
+  Offset? _stickySuggestedCenter;
+  int _lostDetectionCount = 0;
+
+  // One Euro Filters for smooth display
+  late OffsetFilter _offsetFilter;
+  late RectFilter _rectFilter;
+  DateTime _lastSmoothTime = DateTime.now();
 
   AICoachNotifier(this._ref)
-    : super(AICoachState(result: CoachResult.empty())) {
+    : super(AICoachState(result: CoachResult.empty(), isEnabled: false, status: AICoachStatus.idle)) {
+    _offsetFilter = OffsetFilter();
+    _rectFilter = RectFilter();
+    _lastSmoothTime = DateTime.now();
     _ref.listen<CameraState>(
       cameraProvider,
       (previous, next) => _setupFrameListener(next),
@@ -85,35 +82,70 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
     );
   }
 
+  void enable() => _setEnabled(true);
+  void disable() => _setEnabled(false);
   void toggleEnabled() {
-    _setEnabled(!state.isEnabled);
-  }
-
-  void enable() {
-    _setEnabled(true);
+    if (state.isEnabled) {
+      disable();
+    } else {
+      enable();
+    }
   }
 
   void _setEnabled(bool enabled) {
-    state = state.copyWith(
-      isEnabled: enabled,
-      status: enabled ? AICoachStatus.analyzing : AICoachStatus.analyzing,
-      tags: enabled ? state.tags : [],
-      roiBounds: enabled ? state.roiBounds : null,
-      autoCaptureRequested: false,
-    );
-    _frameCounter = 0;
-    _isImaggaAnalyzing = false;
+    if (enabled) {
+      state = state.copyWith(
+        isEnabled: true,
+        status: AICoachStatus.scanning,
+        result: CoachResult.empty(),
+        displayResult: CoachResult.empty(),
+        aiSuggestedFrame: null,
+        aiSuggestedCenter: null,
+      );
+      _frameCounter = 0;
+      _stableDetectCount = 0;
+      _stickySuggestedCenter = null;
+      _lostDetectionCount = 0;
+      _offsetFilter.reset();
+      _rectFilter.reset();
+      _lastSmoothTime = DateTime.now();
 
-    if (enabled && _lastController != null) {
-      _startStream(_lastController!);
+      if (_lastController != null) {
+        _startStream(_lastController!);
+      }
+      HapticFeedback.mediumImpact();
     } else {
       if (_isStreaming) {
         _lastController?.stopImageStream();
         _isStreaming = false;
       }
-      _currentZoom = 1.0;
+      state = state.copyWith(
+        isEnabled: false,
+        status: AICoachStatus.idle,
+        result: CoachResult.empty(),
+        displayResult: CoachResult.empty(),
+        aiSuggestedFrame: null,
+        aiSuggestedCenter: null,
+      );
       _ref.read(cameraProvider.notifier).setZoom(1.0);
     }
+  }
+
+  void cancelFrame() {
+    state = state.copyWith(
+      status: AICoachStatus.scanning,
+      aiSuggestedFrame: null,
+      aiSuggestedCenter: null,
+      result: CoachResult.empty(),
+      displayResult: CoachResult.empty(),
+    );
+    _frameCounter = 0;
+    _stableDetectCount = 0;
+    _stickySuggestedCenter = null;
+    _lostDetectionCount = 0;
+    _offsetFilter.reset();
+    _rectFilter.reset();
+    _lastSmoothTime = DateTime.now();
   }
 
   void _setupFrameListener(CameraState cameraState) {
@@ -132,9 +164,7 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
         _isStreaming = false;
       }
       _lastController = cameraState.controller;
-      if (state.isEnabled) {
-        _startStream(_lastController!);
-      }
+      if (state.isEnabled) _startStream(_lastController!);
       return;
     }
 
@@ -149,216 +179,167 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
 
     controller.startImageStream((image) {
       if (!state.isEnabled || _isBusy) return;
-
-      final now = DateTime.now();
-      // Tối ưu: Chỉ phân tích mỗi 200ms (5 FPS) để giữ Camera preview mượt mà
-      if (now.difference(_lastProcessTime).inMilliseconds < 200) {
-        return;
-      }
-
+      if (DateTime.now().difference(_lastProcessTime).inMilliseconds < 60) return; // Faster: ~16 FPS processing
       _processFrame(image, controller.description);
     });
   }
 
-  Future<void> _processFrame(
-    CameraImage image,
-    CameraDescription camera,
-  ) async {
+  Future<void> _processFrame(CameraImage image, CameraDescription camera) async {
     _isBusy = true;
     _lastProcessTime = DateTime.now();
     _frameCounter++;
 
     try {
       final inputImage = _convertCameraImage(image, camera);
-      if (inputImage != null) {
-        final result = await _aiService.processImage(inputImage);
+      if (inputImage == null) return;
 
-        AICoachStatus newStatus = state.status;
+      final result = await _aiService.processImage(inputImage);
 
-        if (_frameCounter == 5 && !_isImaggaAnalyzing) {
-          _triggerImaggaAnalysis();
-        }
+      if (!state.isEnabled) return;
 
-        if (_frameCounter < 8) {
-          newStatus = AICoachStatus.analyzing;
-        } else if (result.score < 85) {
-          // Ngưỡng khắt khe hơn để hiện Guide Ring
-          newStatus = AICoachStatus.guiding;
-        } else {
-          newStatus = AICoachStatus.finished;
-        }
-
-        if (newStatus == AICoachStatus.finished && state.status != AICoachStatus.finished) {
-          HapticFeedback.mediumImpact();
-        }
-
+      // Doka Style: Suggest a better composition point (e.g., Rule of Thirds)
+      if (result.subjectCenter != null && result.subjectBounds != null) {
+        _stableDetectCount++;
+        _lostDetectionCount = 0;
+        
         final displayResult = _smoothResult(state.displayResult, result);
-        final bool shouldRequestAutoCapture =
-            state.autoCaptureEnabled &&
-            result.score >= 85 &&
-            newStatus == AICoachStatus.finished;
+        final imgWidth = result.imageSize.width;
+        final imgHeight = result.imageSize.height;
+
+        // Sticky Logic: Keep the same target point if we already have one
+        Offset suggestedCenter;
+        if (_stickySuggestedCenter != null) {
+          suggestedCenter = _stickySuggestedCenter!;
+        } else {
+          // Intersection points for Rule of Thirds
+          final targets = [
+            Offset(imgWidth / 3, imgHeight / 3),
+            Offset(2 * imgWidth / 3, imgHeight / 3),
+            Offset(imgWidth / 3, 2 * imgHeight / 3),
+            Offset(2 * imgWidth / 3, 2 * imgHeight / 3),
+            Offset(imgWidth / 2, imgHeight / 2),
+          ];
+
+          // Find closest target to current subject center
+          final currentCenter = result.subjectCenter!;
+          suggestedCenter = targets.first;
+          double minDist = (currentCenter - suggestedCenter).distance;
+          
+          for (final t in targets) {
+            final d = (currentCenter - t).distance;
+            if (d < minDist) {
+              minDist = d;
+              suggestedCenter = t;
+            }
+          }
+          _stickySuggestedCenter = suggestedCenter;
+        }
+
+        // Logic for "Almost There" (close to target)
+        final bool isClose = (result.subjectCenter! - suggestedCenter).distance < 80.0;
+        final bool isLocked = (result.subjectCenter! - suggestedCenter).distance < 30.0;
+
+        // Sticky status: If we are almost there, don't drop back to frameFound easily
+        // This prevents the "jumping out" behavior during expansion
+        AICoachStatus newStatus;
+        if (state.status == AICoachStatus.almostThere && !isClose) {
+          // Add hysteresis: must be further away (120 units) to drop status
+          newStatus = (result.subjectCenter! - suggestedCenter).distance < 120.0 
+              ? AICoachStatus.almostThere 
+              : AICoachStatus.frameFound;
+        } else {
+          newStatus = isClose ? AICoachStatus.almostThere : AICoachStatus.frameFound;
+        }
+
+        if (isLocked && _stableDetectCount % 10 == 0) {
+           HapticFeedback.selectionClick();
+        }
 
         state = state.copyWith(
+          status: newStatus,
+          aiSuggestedFrame: result.subjectBounds != null 
+              ? Rect.fromCenter(
+                  center: suggestedCenter, 
+                  width: result.subjectBounds!.width * 1.4, 
+                  height: result.subjectBounds!.height * 1.4
+                )
+              : null,
+          aiSuggestedCenter: suggestedCenter,
           result: result,
           displayResult: displayResult,
-          roiBounds: result.subjectBounds,
-          status: newStatus,
-          autoCaptureRequested: shouldRequestAutoCapture,
         );
-
-        // Luôn xử lý zoom dựa trên điểm số thực tế
-        if (result.subjectCenter != null) {
-          _handleAutoZoom(result);
+      } else {
+        _stableDetectCount = 0;
+        _lostDetectionCount++;
+        
+        // Only clear the sticky target if detection is lost for ~2 seconds (32 frames @ 16fps)
+        if (_lostDetectionCount > 32) {
+          _stickySuggestedCenter = null;
         }
+
+        state = state.copyWith(
+          status: AICoachStatus.scanning,
+          result: result,
+          displayResult: result,
+        );
       }
     } catch (e) {
-      debugPrint('Error processing frame: $e');
+      debugPrint('Process error: $e');
     } finally {
       _isBusy = false;
     }
   }
 
-  void _handleAutoZoom(CoachResult result) {
-    if (result.subjectCenter == null || result.imageSize == Size.zero) return;
+  Future<void> takePicture() async {
+    final file = await _ref.read(cameraProvider.notifier).takePicture();
+    if (file == null) return;
+  }
 
-    final settings = _ref.read(settingsProvider);
-    if (!settings.autoZoom) return;
+  CoachResult _smoothResult(CoachResult prev, CoachResult next) {
+    if (next.subjectCenter == null) return next;
 
-    // Sử dụng ngưỡng điểm số cao và ổn định hơn để tránh giật
-    if (result.score >= 88) {
-      if (_currentZoom < 1.4) {
-        // Zoom vào từ từ
-        _currentZoom += 0.02;
-        _ref.read(cameraProvider.notifier).setZoom(_currentZoom);
-      }
-    } else if (result.score < 70) {
-      if (_currentZoom > 1.0) {
-        // Zoom ra từ từ để tránh giật hình
-        _currentZoom -= 0.05;
-        if (_currentZoom < 1.0) _currentZoom = 1.0;
-        _ref.read(cameraProvider.notifier).setZoom(_currentZoom);
+    final now = DateTime.now();
+    final dt = now.difference(_lastSmoothTime).inMilliseconds / 1000.0;
+    _lastSmoothTime = now;
+
+    final Offset center;
+    final Rect bounds;
+
+    if (prev.subjectCenter == null) {
+      center = next.subjectCenter!;
+      bounds = next.subjectBounds ?? next.subjectBounds!;
+      _offsetFilter.reset();
+      _rectFilter.reset();
+    } else {
+      center = _offsetFilter.smooth(next.subjectCenter!, dt);
+      if (next.subjectBounds != null) {
+        bounds = _rectFilter.smooth(next.subjectBounds!, dt);
+      } else {
+        bounds = next.subjectBounds!;
       }
     }
-  }
-
-  void setRoiBounds(Rect? bounds) {
-    if (bounds == state.roiBounds) return;
-    state = state.copyWith(roiBounds: bounds);
-  }
-
-  void toggleAutoCapture() {
-    state = state.copyWith(
-      autoCaptureEnabled: !state.autoCaptureEnabled,
-      autoCaptureRequested: false,
-    );
-  }
-
-  void clearAutoCaptureRequest() {
-    if (!state.autoCaptureRequested) return;
-    state = state.copyWith(autoCaptureRequested: false);
-  }
-
-  CoachResult _smoothResult(CoachResult previous, CoachResult next) {
-    if (previous.subjectCenter == null || next.subjectCenter == null) {
-      return next;
-    }
-
-    final smoothCenter = Offset.lerp(
-      previous.subjectCenter,
-      next.subjectCenter,
-      0.22,
-    )!;
-    final smoothBounds =
-        Rect.lerp(previous.subjectBounds, next.subjectBounds, 0.18) ??
-        next.subjectBounds;
 
     return CoachResult(
-      subjectBounds: smoothBounds,
-      subjectCenter: smoothCenter,
+      subjectBounds: bounds,
+      subjectCenter: center,
       horizonAngle: next.horizonAngle,
       instruction: next.instruction,
-      score: next.score,
-      isBalanced: next.isBalanced,
-      metrics: next.metrics,
       imageSize: next.imageSize,
+      objectName: next.objectName,
+      isTargetLocked: next.isTargetLocked,
+      directionHint: next.directionHint,
     );
-  }
-
-  Future<void> _triggerImaggaAnalysis() async {
-    if (_isImaggaAnalyzing ||
-        _lastController == null ||
-        _lastController!.value.isTakingPicture) {
-      return;
-    }
-    _isImaggaAnalyzing = true;
-
-    try {
-      // Capture a single frame to a temporary file
-      final XFile photo = await _lastController!.takePicture();
-
-      // Analyze with Imagga
-      final tagResult = await _imaggaService.analyzeImage(photo.path);
-
-      if (tagResult.containsKey('result')) {
-        final tagsData = tagResult['result']['tags'] as List;
-        final tags = tagsData
-            .take(5)
-            .map((t) => t['tag']['en'].toString())
-            .toList();
-
-        state = state.copyWith(
-          tags: tags,
-          recommendedFilter: _mapTagsToFilter(tags),
-        );
-      }
-
-      // Delete temporary file
-      final file = File(photo.path);
-      if (await file.exists()) {
-        await file.delete();
-      }
-    } catch (e) {
-      debugPrint('Imagga analysis error: $e');
-    } finally {
-      _isImaggaAnalyzing = false;
-    }
-  }
-
-  String _mapTagsToFilter(List<String> tags) {
-    final lowerTags = tags.map((t) => t.toLowerCase()).toList();
-    if (lowerTags.any(
-      (t) => t.contains('nature') || t.contains('tree') || t.contains('grass'),
-    )) {
-      return 'Summer Fresh';
-    }
-    if (lowerTags.any((t) => t.contains('food') || t.contains('drink'))) {
-      return 'Vivid Food';
-    }
-    if (lowerTags.any(
-      (t) =>
-          t.contains('person') ||
-          t.contains('face') ||
-          t.contains('man') ||
-          t.contains('woman'),
-    )) {
-      return 'Soft Portrait';
-    }
-    return 'Classic F16';
   }
 
   InputImage? _convertCameraImage(CameraImage image, CameraDescription camera) {
     try {
-      final WriteBuffer allBytes = WriteBuffer();
-      for (final Plane plane in image.planes) {
-        allBytes.putUint8List(plane.bytes);
+      final buffer = WriteBuffer();
+      for (final plane in image.planes) {
+        buffer.putUint8List(plane.bytes);
       }
-      final bytes = allBytes.done().buffer.asUint8List();
-
-      final InputImageFormat? format = InputImageFormatValue.fromRawValue(
-        image.format.raw,
-      );
+      final bytes = buffer.done().buffer.asUint8List();
+      final format = InputImageFormatValue.fromRawValue(image.format.raw);
       if (format == null) return null;
-
       return InputImage.fromBytes(
         bytes: bytes,
         metadata: InputImageMetadata(
@@ -369,21 +350,16 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
         ),
       );
     } catch (e) {
-      debugPrint('Conversion error: $e');
       return null;
     }
   }
 
   InputImageRotation _getImageRotation(CameraDescription camera) {
     switch (camera.sensorOrientation) {
-      case 90:
-        return InputImageRotation.rotation90deg;
-      case 180:
-        return InputImageRotation.rotation180deg;
-      case 270:
-        return InputImageRotation.rotation270deg;
-      default:
-        return InputImageRotation.rotation0deg;
+      case 90: return InputImageRotation.rotation90deg;
+      case 180: return InputImageRotation.rotation180deg;
+      case 270: return InputImageRotation.rotation270deg;
+      default: return InputImageRotation.rotation0deg;
     }
   }
 
@@ -394,8 +370,6 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
   }
 }
 
-final aiCoachProvider = StateNotifierProvider<AICoachNotifier, AICoachState>((
-  ref,
-) {
+final aiCoachProvider = StateNotifierProvider<AICoachNotifier, AICoachState>((ref) {
   return AICoachNotifier(ref);
 });
