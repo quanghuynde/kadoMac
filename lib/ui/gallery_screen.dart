@@ -135,7 +135,8 @@ class _GalleryScreenState extends State<GalleryScreen> {
                             context,
                             MaterialPageRoute(
                               builder: (context) => PhotoPreviewScreen(
-                                photoData: photo,
+                                photos: photos,
+                                initialIndex: index,
                               ),
                             ),
                           );

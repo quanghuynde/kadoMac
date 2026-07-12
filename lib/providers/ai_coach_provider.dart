@@ -6,6 +6,7 @@ import 'package:google_mlkit_object_detection/google_mlkit_object_detection.dart
 import 'package:project/models/coach_result.dart';
 import 'package:project/providers/camera_provider.dart';
 import 'package:project/services/ai_service.dart';
+import 'package:project/services/scene_classifier.dart';
 import 'package:project/utils/one_euro_filter.dart';
 
 /// State machine for subject tracking
@@ -60,10 +61,10 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
   bool _isStreaming = false;
   DateTime _lastProcessTime = DateTime.now();
   CameraController? _lastController;
-  int _frameCounter = 0;
   int _stableDetectCount = 0;
   Offset? _stickySuggestedCenter;
   int _lostDetectionCount = 0;
+  String? _lastPrimarySceneCategory;
 
   // One Euro Filters for smooth display
   late OffsetFilter _offsetFilter;
@@ -102,10 +103,10 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
         aiSuggestedFrame: null,
         aiSuggestedCenter: null,
       );
-      _frameCounter = 0;
       _stableDetectCount = 0;
       _stickySuggestedCenter = null;
       _lostDetectionCount = 0;
+      _lastPrimarySceneCategory = null;
       _offsetFilter.reset();
       _rectFilter.reset();
       _lastSmoothTime = DateTime.now();
@@ -139,10 +140,10 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
       result: CoachResult.empty(),
       displayResult: CoachResult.empty(),
     );
-    _frameCounter = 0;
     _stableDetectCount = 0;
     _stickySuggestedCenter = null;
     _lostDetectionCount = 0;
+    _lastPrimarySceneCategory = null;
     _offsetFilter.reset();
     _rectFilter.reset();
     _lastSmoothTime = DateTime.now();
@@ -187,17 +188,37 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
   Future<void> _processFrame(CameraImage image, CameraDescription camera) async {
     _isBusy = true;
     _lastProcessTime = DateTime.now();
-    _frameCounter++;
 
     try {
       final inputImage = _convertCameraImage(image, camera);
       if (inputImage == null) return;
 
       final result = await _aiService.processImage(inputImage);
+      final sceneResult = await SceneClassifier.instance.classify(inputImage);
 
       if (!state.isEnabled) return;
 
-      // Doka Style: Suggest a better composition point (e.g., Rule of Thirds)
+      // Identify Primary Category
+      String currentCategory = 'general';
+      final labels = sceneResult.labels.map((l) => l.label.toLowerCase()).toList();
+      
+      if (labels.any((l) => l.contains('person') || l.contains('face') || l.contains('portrait'))) {
+        currentCategory = 'portrait';
+      } else if (labels.any((l) => l.contains('building') || l.contains('architecture') || l.contains('city'))) {
+        currentCategory = 'architecture';
+      } else if (labels.any((l) => l.contains('landscape') || l.contains('nature') || l.contains('mountain'))) {
+        currentCategory = 'landscape';
+      } else if (labels.any((l) => l.contains('food') || l.contains('drink') || l.contains('dish'))) {
+        currentCategory = 'food';
+      }
+
+      // 1. ABSOLUTE STABILITY: Only recalculate if scene category changes or lock is null
+      bool sceneChanged = _lastPrimarySceneCategory != null && _lastPrimarySceneCategory != currentCategory;
+      if (sceneChanged) {
+        _stickySuggestedCenter = null; // Force recalculation on scene change
+      }
+      _lastPrimarySceneCategory = currentCategory;
+
       if (result.subjectCenter != null && result.subjectBounds != null) {
         _stableDetectCount++;
         _lostDetectionCount = 0;
@@ -206,44 +227,67 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
         final imgWidth = result.imageSize.width;
         final imgHeight = result.imageSize.height;
 
-        // Sticky Logic: Keep the same target point if we already have one
-        Offset suggestedCenter;
-        if (_stickySuggestedCenter != null) {
-          suggestedCenter = _stickySuggestedCenter!;
-        } else {
-          // Intersection points for Rule of Thirds
-          final targets = [
-            Offset(imgWidth / 3, imgHeight / 3),
-            Offset(2 * imgWidth / 3, imgHeight / 3),
-            Offset(imgWidth / 3, 2 * imgHeight / 3),
-            Offset(2 * imgWidth / 3, 2 * imgHeight / 3),
-            Offset(imgWidth / 2, imgHeight / 2),
-          ];
+        // 2. Artistic Composition Points
+        if (_stickySuggestedCenter == null) {
+          // Define possible targets for this category
+          List<Offset> targets;
+          switch (currentCategory) {
+            case 'portrait':
+              targets = [
+                Offset(imgWidth * 0.5, imgHeight * 0.3),   // Eye level center
+                Offset(imgWidth * 0.33, imgHeight * 0.33), // Upper Left
+                Offset(imgWidth * 0.66, imgHeight * 0.33), // Upper Right
+              ];
+              break;
+            case 'landscape':
+              targets = [
+                Offset(imgWidth * 0.382, imgHeight * 0.382), // Golden Ratio Intersections
+                Offset(imgWidth * 0.618, imgHeight * 0.382),
+                Offset(imgWidth * 0.382, imgHeight * 0.618),
+                Offset(imgWidth * 0.618, imgHeight * 0.618),
+              ];
+              break;
+            case 'architecture':
+              targets = [
+                Offset(imgWidth * 0.5, imgHeight * 0.5),   // Dead center for symmetry
+                Offset(imgWidth * 0.5, imgHeight * 0.33),  // Vertical third center
+              ];
+              break;
+            default:
+              targets = [
+                Offset(imgWidth / 3, imgHeight / 3),
+                Offset(2 * imgWidth / 3, imgHeight / 3),
+                Offset(imgWidth / 3, 2 * imgHeight / 3),
+                Offset(2 * imgWidth / 3, 2 * imgHeight / 3),
+                Offset(imgWidth / 2, imgHeight / 2),
+              ];
+          }
 
-          // Find closest target to current subject center
-          final currentCenter = result.subjectCenter!;
-          suggestedCenter = targets.first;
-          double minDist = (currentCenter - suggestedCenter).distance;
+          // Pick the closest artistic target and LOCK IT FOREVER (until scene change)
+          final currentSubjectCenter = result.subjectCenter!;
+          Offset bestTarget = targets.first;
+          double minDist = (currentSubjectCenter - bestTarget).distance;
           
           for (final t in targets) {
-            final d = (currentCenter - t).distance;
+            final d = (currentSubjectCenter - t).distance;
             if (d < minDist) {
               minDist = d;
-              suggestedCenter = t;
+              bestTarget = t;
             }
           }
-          _stickySuggestedCenter = suggestedCenter;
+          _stickySuggestedCenter = bestTarget;
+          HapticFeedback.lightImpact(); // Notify user of new stable lock
         }
 
-        // Logic for "Almost There" (close to target)
+        final suggestedCenter = _stickySuggestedCenter!;
+
+        // Logic for Alignment Status
         final bool isClose = (result.subjectCenter! - suggestedCenter).distance < 80.0;
         final bool isLocked = (result.subjectCenter! - suggestedCenter).distance < 30.0;
 
-        // Sticky status: If we are almost there, don't drop back to frameFound easily
-        // This prevents the "jumping out" behavior during expansion
         AICoachStatus newStatus;
         if (state.status == AICoachStatus.almostThere && !isClose) {
-          // Add hysteresis: must be further away (120 units) to drop status
+          // Hysteresis for status transitions
           newStatus = (result.subjectCenter! - suggestedCenter).distance < 120.0 
               ? AICoachStatus.almostThere 
               : AICoachStatus.frameFound;
@@ -272,9 +316,10 @@ class AICoachNotifier extends StateNotifier<AICoachState> {
         _stableDetectCount = 0;
         _lostDetectionCount++;
         
-        // Only clear the sticky target if detection is lost for ~2 seconds (32 frames @ 16fps)
+        // 3. Persistent Lock: Only clear if lost for a significant time (2 seconds)
         if (_lostDetectionCount > 32) {
           _stickySuggestedCenter = null;
+          _lastPrimarySceneCategory = null;
         }
 
         state = state.copyWith(

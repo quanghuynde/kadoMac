@@ -24,7 +24,7 @@ class AICameraCoachApp extends ConsumerWidget {
     final isLoggedIn = ref.watch(authStateProvider);
 
     return MaterialApp(
-      title: 'AI Camera Coach',
+      title: 'Kado Mac',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
