@@ -26,6 +26,17 @@ class _CameraBottomControlsState extends ConsumerState<CameraBottomControls> {
   double _exposureValue = 100.0;
 
   Future<void> _triggerCapture(BuildContext context, WidgetRef ref) async {
+    final timerSecs = ref.read(selfTimerProvider);
+    
+    if (timerSecs > 0) {
+      // Start countdown
+      for (int i = timerSecs; i > 0; i--) {
+        ref.read(countdownProvider.notifier).state = i;
+        await Future.delayed(const Duration(seconds: 1));
+      }
+      ref.read(countdownProvider.notifier).state = 0;
+    }
+
     final aiState = ref.read(aiCoachProvider);
     final currentFilter = FilterEngine.instance.currentFilter;
     

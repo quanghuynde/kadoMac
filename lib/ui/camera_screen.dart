@@ -75,6 +75,33 @@ class _CameraScreenState extends ConsumerState<CameraScreen> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
+                          // Timer Button
+                          GestureDetector(
+                            onTap: () {
+                              final current = ref.read(selfTimerProvider);
+                              // Cycle: 0 -> 3 -> 5 -> 10 -> 0
+                              final next = current == 0 ? 3 : current == 3 ? 5 : current == 5 ? 10 : 0;
+                              ref.read(selfTimerProvider.notifier).state = next;
+                            },
+                            child: Row(
+                              children: [
+                                Icon(
+                                  ref.watch(selfTimerProvider) == 0 ? Icons.timer_off_outlined : Icons.timer_outlined,
+                                  color: ref.watch(selfTimerProvider) == 0 ? Colors.white : Colors.amber,
+                                  size: 22,
+                                ),
+                                if (ref.watch(selfTimerProvider) > 0)
+                                  Padding(
+                                    padding: const EdgeInsets.only(left: 4),
+                                    child: Text(
+                                      '${ref.watch(selfTimerProvider)}s',
+                                      style: const TextStyle(color: Colors.amber, fontSize: 12, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+
                           // Flash Button
                           GestureDetector(
                             onTap: () => ref.read(cameraProvider.notifier).toggleFlash(),

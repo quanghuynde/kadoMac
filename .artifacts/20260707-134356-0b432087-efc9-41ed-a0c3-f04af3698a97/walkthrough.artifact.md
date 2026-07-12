@@ -1,25 +1,27 @@
-# Walkthrough - Dynamic Framing & Result Precision
+# Walkthrough - Photo Editing Integration
 
-I have implemented a major fix to the AI framing system, making it flexible and ensuring that your saved photos match exactly what you see on screen.
+I have successfully replaced the share icon with a professional **Photo Editing** feature in the `PhotoPreviewScreen`.
 
-## Key Fixes
+## Key Improvements
 
-### 1. Flexible Framing Box
-- **Dynamic Sizing**: The colorful framing box is no longer limited to a fixed 240px size. It now **automatically adjusts its size** to fit the subject detected by the AI. Small objects get smaller boxes, and large subjects get larger boxes.
-- **Synchronized Viewport**: The viewport mask and the colorful box now expand together based on the AI's subject detection, providing a much more natural feel.
+### 1. Unified Editing Interface
+- **Icon Update**: Replaced the share icon with the `tune_rounded` icon in the `AppBar`, signaling a dedicated editing mode.
+- **Adjustment Panel**: Implemented a sliding bottom panel that appears when the edit icon is tapped. This panel contains professional-grade sliders for:
+    - **Brightness**
+    - **Exposure**
+    - **Contrast**
+    - **Color Temperature**
+    - **Saturation**
+    - **Fade**
 
-### 2. Pixel-Perfect Capture Results
-- **Accurate Cropping**: Fixed the mismatch between the viewfinder and the saved photo. The `CaptureService` now uses the **exact same coordinates** as the UI framing box to crop the high-resolution image.
-- **Orientation Awareness**: The cropping logic now correctly handles sensor orientation and aspect ratio differences, ensuring your subject is always perfectly centered and cropped as shown in the preview.
-
-### 3. Theme Application & UI
-- **Baked-in Themes**: Themes (like CC, CN, Vista 800) are now **correctly applied** to the saved image bytes. What you see in the preview is exactly what you get in your gallery.
-- **Vietnamese UI**: All theme selection text is now fully in Vietnamese.
-- **Fast Selection**: Choosing a theme now immediately returns you to the camera view for a smoother workflow.
+### 2. Enhanced User Experience
+- **Live Real-time Preview**: As you move the sliders, the color matrix is updated immediately, allowing you to see the effect on your photo instantly.
+- **Swipe Protection**: While in "Edit Mode," the horizontal swiping of the `PageView` is automatically disabled. This prevents accidental swiping and ensures you can focus on fine-tuning your current photo.
+- **Persistence**: Tapping "Lưu" (Save) updates the photo's data in the database and the local list, ensuring your artistic choices are kept even when you swipe between photos.
+- **Reset & Revert**: You can easily "Đặt lại" (Reset) all sliders to zero or "Hủy" (Cancel) to revert all changes made during the current editing session.
 
 ## Verification Summary
-
-### Manual Verification
-- **Dynamic Framing**: Tested with subjects of different sizes; confirmed the box adapts to the subject.
-- **Result Consistency**: Verified that the photo in the `ResultScreen` is a perfect match for the area inside the colorful box during capture.
-- **Theme Persistence**: Verified that "Vista 800" and other themes are visible in the saved files.
+- **UI Logic**: Verified that tapping the tune icon opens the panel and hides the AI info panel.
+- **State Integrity**: Confirmed that swiping is correctly disabled during editing.
+- **Data Persistence**: Verified that changes are saved to the database and reflect correctly when the photo is reopened.
+- **Live Preview**: Confirmed that the `ColorFiltered` widget correctly applies the calculated matrix in real-time.

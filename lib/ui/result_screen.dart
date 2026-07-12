@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:project/models/coach_result.dart';
 import 'package:project/services/database_service.dart';
+import 'package:share_plus/share_plus.dart';
 
 class ResultScreen extends StatefulWidget {
   final String imagePath;
@@ -59,7 +60,9 @@ class _ResultScreenState extends State<ResultScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.share),
-            onPressed: () {},
+            onPressed: () {
+              Share.shareXFiles([XFile(widget.imagePath)], text: 'Check out my Kado Mac shot!');
+            },
           ),
         ],
       ),
